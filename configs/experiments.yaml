@@ -1,0 +1,36 @@
+# Experiment configurations
+
+experiments:
+  exp_ext_001:
+    name: "WHT Representation Invariance"
+    seeds: 100
+    vector_dim: 32
+    n_clusters: 5
+    vectors_per_cluster: 10
+
+  exp_ext_003:
+    name: "Epistemic Firewall Benchmark"
+    n_useful: 100
+    n_noise: 100
+    n_poison: 100
+
+  exp_ext_004:
+    name: "Prediction-Based Trust Calibration"
+    n_interactions: 100
+    agents:
+      a_persuasive:
+        accuracy: 0.10
+        presentation: high
+      b_awkward:
+        accuracy: 0.70
+        presentation: low
+      c_novel:
+        accuracy_start: 0.20
+        accuracy_end: 0.80
+        trend: improving
+
+  exp_soc_001:
+    name: "Cognitive Ecology Stability"
+    n_agents: 6
+    n_interactions: 2000
+    genome_file: "configs/agents.yaml"
