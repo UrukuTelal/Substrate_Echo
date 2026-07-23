@@ -2,6 +2,49 @@
 
 All notable changes to Substrate_Echo will be documented in this file.
 
+## [0.10.0] - 2026-07-22
+
+### Added — Integration Tests (S13-S14)
+- `tests/test_integration.py`: Full pipeline validation
+- Goal → Attention pipeline tests
+- Resource → Embodiment sharing tests
+- Council → Audit pipeline tests
+- Prediction → Confidence tests
+- Multi-embodiment learning tests
+- End-to-end full cycle tests
+- 19 tests passing
+
+## [0.9.0] - 2026-07-22
+
+### Added — Council Layer (S12)
+- `kernel/council.py`: Council for metacognition and health checks
+- ScheduledAuditor: periodic audits every N ticks
+- EventAuditor: trigger-based audits (collapse, entropy, memory explosion)
+- DriftDetector: architectural and concept drift detection
+- AuditReport: observations, anomalies, hypotheses, recommendations
+- CouncilState: health score, drift score, pending reports
+- 18 tests passing (test_council.py)
+
+## [0.8.0] - 2026-07-22
+
+### Added — Resource Manager (S11)
+- `kernel/resources.py`: ResourceManager for finite cognitive resources
+- ResourceBudget: compute, memory, learning, attention tracking
+- ResourceLease: time-limited resource grants with tier priorities
+- ResourceRequest/Allocation: request/grant protocol
+- Safety scaling: emergency resource throttling
+- 17 tests passing (test_resources.py)
+
+## [0.7.0] - 2026-07-22
+
+### Added — Executive Function Layer (S10)
+- `kernel/executive.py`: Goal lifecycle management (S10.1)
+- PriorityScorer: urgency × importance × confidence × expected_value / resource_cost (S10.2)
+- AttentionAllocator: finite attention based on prediction errors and novelty (S10.3)
+- GoalGenerator: automatic goal creation from safety triggers (S10.4)
+- ExecutiveFunction: orchestrates goal management, integrated into SubstrateKernel
+- 16 tests passing (test_executive.py)
+
 ## [0.6.0] - 2026-07-21
 
 ### Added — Substrate Kernel

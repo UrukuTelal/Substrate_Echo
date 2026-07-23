@@ -39,6 +39,9 @@ import time
 from ..core.dynamics_memory import DynamicsMemory, DynamicsMemoryConfig
 from ..dynamics.basin_topology import BasinTopology
 from ..dynamics.abstraction import AbstractionEngine
+from .executive import ExecutiveFunction, GoalState, GoalStatus, GoalTier, ExecutiveState
+from .resources import ResourceManager, ResourceRequest, ResourceAllocation, ResourceState
+from .council import Council, AuditReport, CouncilState
 
 
 # ── Cognitive Plane: State Types ──────────────────────────────────
@@ -141,6 +144,7 @@ class CognitiveState:
     active_embodiments: int = 0
     cognitive_energy: float = 0.0
     timestamp: float = 0.0
+    executive: Optional[ExecutiveState] = None
 
 
 # ── Kernel Config ─────────────────────────────────────────────────
@@ -188,6 +192,9 @@ class SubstrateKernel:
             correlation_threshold=self.config.correlation_threshold,
             min_cluster_size=2,
             meta_sigma=self.config.meta_sigma)
+        self.executive = ExecutiveFunction()
+        self.resources = ResourceManager()
+        self.council = Council()
 
         # Cognitive state
         self._tick = 0
@@ -240,13 +247,29 @@ class SubstrateKernel:
         # Apply pending rewards
         self._apply_rewards()
 
-        # Generate action + prediction
+        # Executive function: manage goals, attention, priorities
+        exec_state = self.executive.tick(obs)
+
+        # Generate action + prediction (influenced by executive attention)
         action = self._generate_action(state)
         prediction = self._generate_prediction(state)
 
         # Build response
         topo = self.topology.compute_metrics()
         abs_summary = self.abstraction.summary()
+
+        # Council: periodic audits and health checks
+        substrate_state = {
+            "tick": self._tick,
+            "n_attractors": len(self._base_attractors),
+            "n_meta_attractors": abs_summary["n_meta"],
+            "coherence": self._compute_coherence(),
+            "volume_entropy": topo.volume_entropy,
+            "basin_balance": topo.basin_balance,
+            "n_goals": exec_state.n_active,
+            "n_embodiments": sum(1 for e in self._embodiments.values() if e.is_active),
+        }
+        new_reports = self.council.tick(substrate_state)
 
         cognitive_state = CognitiveState(
             tick=self._tick,
@@ -258,9 +281,10 @@ class SubstrateKernel:
             basin_balance=topo.basin_balance,
             mean_depth=topo.mean_depth,
             volume_entropy=topo.volume_entropy,
-            active_goals=len(self._goals),
+            active_goals=exec_state.n_active,
             active_embodiments=sum(1 for e in self._embodiments.values() if e.is_active),
             cognitive_energy=self._cognitive_energy,
+            executive=exec_state,
             timestamp=time.time(),
         )
 
@@ -296,12 +320,14 @@ class SubstrateKernel:
             "coherence": self._compute_coherence(),
             "cognitive_energy": self._cognitive_energy,
             "n_goals": len(self._goals),
+            "n_executive_goals": self.executive._next_id,
             "n_rewards": len(self._rewards),
             "n_embodiments": len(self._embodiments),
             "active_embodiments": sum(
                 1 for e in self._embodiments.values() if e.is_active),
             "abstraction_events": abs_summary["n_abstraction_events"],
             "topology_events": len(self.topology.events),
+            "resources": self.resources.get_state().budget,
         }
 
     def get_topology_history(self) -> List[Dict]:

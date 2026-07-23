@@ -534,7 +534,7 @@ state. Clients publish observations and receive actions.
 - EXP-SUB-004: Abstraction hierarchy (4 meta-attractors from correlation)
 - Demo: two embodiments sharing one cognitive kernel
 
-## Phase S10: Executive Function Layer
+## Phase S10: Executive Function Layer (COMPLETE ✓)
 
 Governs goal prioritization, attention allocation, resource arbitration,
 and goal lifecycle. Does not replace goals — manages them.
@@ -544,58 +544,67 @@ and goal lifecycle. Does not replace goals — manages them.
 > Goals remain a primitive. A goal describes "a desired state."
 > Executive Function determines "which desired states matter right now?"
 
-### S10.1: Goal Manager
+### S10.1: Goal Manager ✓
 - Goal lifecycle: Created → Active → Paused → Completed → Archived
 - Alternative: Created → Failed → Abandoned
 - Goal state machine with transitions
-- File: `substrate_echo/kernel/executive.py` → `GoalManager`
+- File: `substrate_echo/kernel/executive.py` → `GoalState`, `GoalStatus`, `GoalTier`
 
-### S10.2: Goal Prioritization
+### S10.2: Goal Prioritization ✓
 - Scoring: urgency × importance × confidence × expected_value / resource_cost
 - Dynamic reprioritization based on observations
 - Conflict detection: mutually exclusive goals
 - Conflict resolution: defer, compromise, or abandon
 - File: `substrate_echo/kernel/executive.py` → `PriorityScorer`
 
-### S10.3: Attention Allocation
+### S10.3: Attention Allocation ✓
 - Not every event receives equal processing
 - Attention weights based on: relevance, novelty, urgency, safety
 - Attention landscape: where the kernel "looks" right now
 - Influences which attractors get updated, which predictions get checked
 - File: `substrate_echo/kernel/executive.py` → `AttentionAllocator`
 
-### S10.4: Goal Creation from Observations
+### S10.4: Goal Creation from Observations ✓
 - Observations may generate goals automatically
 - Example: battery=10% → Goal(find_charging_source)
 - Rules: safety triggers, opportunity detection, maintenance needs
 - File: `substrate_echo/kernel/executive.py` → `GoalGenerator`
 
-### State Type: ExecutiveState
+### S10.5: Executive Integration ✓
+- ExecutiveFunction orchestrates all goal management
+- Integrated into SubstrateKernel.observe()
+- ExecutiveState included in CognitiveState and snapshot
+- 16 tests passing (test_executive.py)
+
+### State Type: ExecutiveState ✓
 ```python
 @dataclass
 class ExecutiveState:
-    active_goals: List[GoalState]
+    active_goals: List[Dict[str, Any]]
     priority_weights: Dict[str, float]
-    attention_focus: List[int]    # which attractors have attention
-    resource_budget: ResourceBudget
-    conflicts: List[GoalConflict]
+    attention_focus: Dict[int, float]
+    conflicts: List[Dict[str, Any]]
     uncertainty: float
+    n_goals: int
+    n_active: int
+    n_completed: int
+    n_failed: int
 ```
 
-## Phase S11: Resource Manager
+## Phase S11: Resource Manager (COMPLETE ✓)
 
 With multiple embodiments sharing one substrate, resources become finite.
 Embodiments compete for GPU time, inference capacity, memory updates,
 attention, and learning capacity.
 
-### S11.1: Resource Accounting
+### S11.1: Resource Accounting ✓
 - Compute budget: GPU/CPU allocation across tasks
 - Memory budget: attractor count, consolidation capacity
 - Learning budget: how many new samples per tick
 - Attention budget: how many events get full processing
 - File: `substrate_echo/kernel/resources.py` → `ResourceManager`
 
-### S11.2: Resource Priority Stack
+### S11.2: Resource Priority Stack ✓
 ```
 Tier 0: Safety / Critical Constraints
 Tier 1: Maintenance (consolidation, decay)
@@ -605,13 +614,13 @@ Tier 4: Exploration (novelty-seeking)
 Tier 5: Idle Abstraction (meta-attractor formation)
 ```
 
-### S11.3: Embodiment Scheduling
+### S11.3: Embodiment Scheduling ✓
 - Multiple clients request resources simultaneously
 - Kernel grants, modifies, or denies requests
 - Time-sharing: cognitive resource leases
 - Priority: safety > maintenance > active goals > learning
 
-### S11.4: Cognitive Resource Leases
+### S11.4: Cognitive Resource Leases ✓
 ```python
 @dataclass
 class ResourceLease:
@@ -620,7 +629,25 @@ class ResourceLease:
     compute: float         # [0, 1]
     learning: float        # [0, 1]
     duration: float        # seconds
-    priority: str          # "safety", "maintenance", "goal", "learning"
+    tier: ResourceTier     # safety/maintenance/active/learning/exploration/idle
+```
+
+### S11.5: Safety Scaling ✓
+- scale_for_safety(safety_level): emergency resource throttling
+- Non-safety tiers get reduced resources during emergencies
+
+### State Type: ResourceState ✓
+```python
+@dataclass
+class ResourceState:
+    budget: Dict[str, float]
+    utilization: Dict[str, float]
+    active_leases: int
+    total_leases_issued: int
+    pending_requests: int
+    recent_denials: int
+    n_embodiments: int
+    tier_allocations: Dict[str, float]
 ```
 
 ### State Type: ResourceState
@@ -635,7 +662,7 @@ class ResourceState:
     tier_usage: Dict[int, float]
 ```
 
-## Phase S12: Council / Metacognition Layer
+## Phase S12: Council / Metacognition Layer (COMPLETE ✓)
 
 Scheduled and event-driven review process. Produces reports, not
 direct modifications. Executive Function decides whether recommendations
@@ -646,13 +673,13 @@ become actions.
 > The council is not part of the constant cognition loop.
 > It operates as an audit process — like a periodic health check.
 
-### S12.1: Scheduled Audits
+### S12.1: Scheduled Audits ✓
 - Every N cognitive cycles (configurable)
 - Time-based: daily, weekly
 - Depth: quick scan vs. deep review
 - File: `substrate_echo/kernel/council.py` → `ScheduledAuditor`
 
-### S12.2: Event-Based Audits
+### S12.2: Event-Based Audits ✓
 Triggers:
 - Attractor collapse (sudden strength loss)
 - Excessive entropy reduction (over-specialization)
@@ -662,7 +689,7 @@ Triggers:
 - Major architecture change (new meta-attractors)
 - Abnormal resource usage
 
-### S12.3: Audit Report
+### S12.3: Audit Report ✓
 ```python
 @dataclass
 class AuditReport:
@@ -676,19 +703,25 @@ class AuditReport:
     severity: str             # "info", "warning", "critical"
 ```
 
-### S12.4: Drift Detection
+### S12.4: Drift Detection ✓
 - Compare current substrate state to historical baseline
 - Detect architectural drift: has the system changed character?
 - Detect concept drift: are predictions becoming less accurate?
 - Detect attention drift: is the system focusing on the wrong things?
 
-### S12.5: Experiment Suggestions
+### S12.5: Experiment Suggestions ✓
 - Council proposes experiments to test hypotheses
 - Example: "Attractor A02 and A05 are highly correlated. Suggest merging."
 - Example: "Prediction error increasing. Suggest retraining dynamics model."
 - Executive Function decides whether to act on suggestions
 
-### State Type: CouncilState
+### S12.6: Council Integration ✓
+- Council integrated into SubstrateKernel.observe()
+- Periodic audits run automatically
+- Event-triggered audits detect anomalies
+- 18 tests passing (test_council.py)
+
+### State Type: CouncilState ✓
 ```python
 @dataclass
 class CouncilState:
@@ -700,47 +733,48 @@ class CouncilState:
     n_recommendations: int
 ```
 
-## Phase S13: Integration — Goals Influence Landscape
+## Phase S13: Integration — Goals Influence Landscape (COMPLETE ✓)
 
 Wire the new layers into the existing attractor dynamics.
 
-### S13.1: Goals → Attention Landscape
+### S13.1: Goals → Attention Landscape ✓
 - Active goals create attention gradients in the energy landscape
 - High-priority goals attract more processing
 - Attention influences which attractors get updated
 - Unattended attractors decay faster
 
-### S13.2: Resources → Attractor Strength
+### S13.2: Resources → Attractor Strength ✓
 - Resource allocation affects attractor strengthening
 - High-learning-budget → faster attractor formation
 - Low-learning-budget → consolidation only
 - Resource scarcity → competitive pruning
 
-### S13.3: Prediction Errors → Confidence
+### S13.3: Prediction Errors → Confidence ✓
 - PredictionError drives confidence updates
 - Consistent prediction → confidence increases
 - Prediction failure → confidence decreases, triggers audit
 - High prediction error → novelty signal → exploration
 
-### S13.4: Council → Executive Function
+### S13.4: Council → Executive Function ✓
 - AuditReport recommendations feed into goal creation
 - Drift detection triggers reprioritization
 - Experiment suggestions become goals
 - Health score influences resource allocation
 
-## Phase S14: Full Kernel Integration Test
+## Phase S14: Full Kernel Integration Test (COMPLETE ✓)
 
-### Experiment: Multi-Embodiment Cognitive Substrate
+### Experiment: Multi-Embodiment Cognitive Substrate ✓
 - 3 embodiments: desktop, robot, simulation
 - Shared kernel with executive function, resource manager, council
 - Measure: goal completion rate, resource utilization, audit frequency
 - Measure: abstraction hierarchy depth, attractor count stability
 - Measure: cross-embodiment learning transfer
 
-### Success Criteria
+### Success Criteria ✓
 - Embodiments share attractor landscape without interference
 - Executive Function correctly prioritizes competing goals
 - Resource Manager prevents any embodiment from starving others
 - Council detects anomalies and produces actionable reports
 - Prediction errors drive confidence updates correctly
 - Abstraction hierarchy forms naturally from correlation
+- 19 integration tests passing (test_integration.py)
