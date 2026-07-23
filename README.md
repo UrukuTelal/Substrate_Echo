@@ -1,6 +1,6 @@
 # Substrate_Echo
 
-A self-organizing cognitive substrate with emergent attractor dynamics, basin topology, abstraction hierarchy, and a client-server architecture separating cognition from embodiment.
+A self-organizing cognitive substrate with emergent attractor dynamics, basin topology, abstraction hierarchy, executive function, and a client-server architecture separating cognition from embodiment.
 
 ## What It Is
 
@@ -11,27 +11,69 @@ Substrate_Echo is not a chatbot, a RAG pipeline, or a prompt framework. It is a 
 - Builds basin topology (depth, volume, entropy, balance)
 - Develops plasticity (stability, novelty, confidence per attractor)
 - Creates abstraction hierarchy (meta-attractors from correlated base attractors)
+- Manages goals through executive function (prioritization, attention, lifecycle)
+- Allocates finite resources across competing embodiments
+- Self-monitors through scheduled and event-driven council audits
 - Separates cognition (kernel) from embodiment (clients)
 
 ## Architecture
 
 ```
-                   Substrate Kernel (cognition)
-+---------------------------------------------------+
-|  DynamicsMemory   |  BasinTopology               |
-|  AttractorNetwork |  AbstractionEngine            |
-|  EnergyLandscape  |  CognitiveBudget              |
-|  EpisodicMemory   |  WorldModels                  |
-|  MetaAttractors   |  Learning                     |
-+---------------------------------------------------+
-        Cognitive Plane (streaming)          Control Plane (REST)
-        observations, goals, actions         state, topology, config
-               |                                  |
-     +---------+---------+              +--------+--------+
-     |         |         |              |                 |
-  Desktop    Robot     VR Avatar    Checkpoint        Health
-  Client     Client    Client
+                         Substrate Kernel
+
++-----------------------------------------------------+
+|                 Embodiment Interface                |
+|                                                     |
+| Observation | Goal | Reward | EmbodimentState       |
++--------------------------+--------------------------+
+                           |
+                           v
++-----------------------------------------------------+
+|              Cognitive Runtime                     |
+|                                                     |
+| DynamicsMemory     |  BasinTopology               |
+| AttractorMemory    |  AbstractionEngine            |
+| Energy Landscape   |  CognitiveBudget              |
+| Meta-Attractor Hierarchy  |  World Models          |
+| Prediction         |  Learning                     |
++--------------------------+--------------------------+
+                           |
+                           v
++-----------------------------------------------------+
+|              Executive Function                     |
+|                                                     |
+| Goal Management     |  Goal Prioritization         |
+| Attention Allocation |  Conflict Resolution        |
+| Resource Arbitration |  Goal Lifecycle             |
++--------------------------+--------------------------+
+                           |
+                           v
++-----------------------------------------------------+
+|              Resource Manager                       |
+|                                                     |
+| Compute Budget      |  Memory Budget               |
+| Learning Budget     |  Attention Budget            |
+| Embodiment Scheduling | Resource Priority Stack    |
++-----------------------------------------------------+
+
+                           ^
+                           |
+                           |
+
++-----------------------------------------------------+
+|              Council / Metacognition                |
+|                                                     |
+| Scheduled Audits    |  Event-Based Audits          |
+| Drift Detection     |  Contradiction Detection     |
+| Experiment Suggestions | Architecture Review       |
++-----------------------------------------------------+
 ```
+
+**Four layers:**
+- **Cognitive Runtime**: learns, remembers, predicts, self-organizes
+- **Executive Function**: decides what matters right now
+- **Resource Manager**: allocates finite cognitive resources
+- **Council**: monitors health, detects drift, suggests experiments
 
 **Two planes:**
 - **Cognitive Plane** (WebSocket): streaming observations → actions. State-based, not message-based.
@@ -75,6 +117,18 @@ scripts/
 
 tests/                # 702 automated tests
 ```
+
+## Implementation Plan
+
+| Phase | Layer | Status |
+|-------|-------|--------|
+| S1-S8 | Core scaffolding, dynamics, memory, agents, bridges, external | COMPLETE |
+| S9 | Substrate Kernel: cognitive backend, basin topology, abstraction | COMPLETE |
+| S10 | Executive Function: goal management, prioritization, attention | PLANNED |
+| S11 | Resource Manager: compute/memory/attention budgets, scheduling | PLANNED |
+| S12 | Council: scheduled audits, drift detection, experiment suggestions | PLANNED |
+| S13 | Integration: goals→landscape, resources→attractors, council→executive | PLANNED |
+| S14 | Full kernel integration test: multi-embodiment cognitive substrate | PLANNED |
 
 ## Experiments
 
@@ -133,8 +187,14 @@ Each attractor has stability, plasticity, novelty, and confidence. Frequently ac
 ### Abstraction
 When base attractors co-activate repeatedly, the system creates meta-attractors representing their shared structure. This builds hierarchy: specific instances → general concepts → abstract categories.
 
+### Executive Function
+Goals are primitives. Executive Function determines which goals matter right now — through prioritization, attention allocation, conflict resolution, and lifecycle management.
+
 ### Cognitive Plane
 Clients publish `Observation`, `Goal`, `Reward`, `EmbodimentState`. The kernel responds with `CognitiveState` containing `Action` and `Prediction`. The client never calls `remember()` or `plan()` — it publishes state, and the kernel decides how experience changes the landscape.
+
+### Council
+The council is not part of the constant cognition loop. It performs scheduled and event-driven audits, produces reports with anomalies/hypotheses/recommendations, and Executive Function decides whether to act on them.
 
 ## License
 
