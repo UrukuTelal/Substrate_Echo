@@ -210,13 +210,16 @@ EXP-SUB-002  Can structure self-reinforce?            ✓
 EXP-SUB-003  Can structure differentiate?             ✓
 EXP-SUB-004  Can structure abstract?                  ✓
 EXP-SUB-005  Can structure survive conflict?          ✓
-EXP-SC2      Can structure anticipate another structure?  ← NEXT
+EXP-SC2-001  Kernel Integration Test                  ✓
+EXP-SC2-002  Truce Mode Test                          ✓
+EXP-SC2-003  Trust Dynamics Test                       ✓
+EXP-SC2-004  Companion Mode Test                       ✓
 ```
 
 **First Success Criterion:**
 > Can the substrate maintain coherent cognition while embedded in a hostile, partially observed, adversarial environment?
 
-See [PLAN.md](PLAN.md) for full SC2 architecture and experiment details.
+**All SC2 experiments complete.** See [PLAN.md](PLAN.md) for full SC2 architecture and experiment details.
 
 ## Quick Start
 

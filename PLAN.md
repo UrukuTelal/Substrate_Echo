@@ -1184,7 +1184,7 @@ The first success criterion is:
 | SC2.6 | Trickster StoryTeller (narrative layer) | ✓ COMPLETE |
 | SC2.7 | SC2 Council (Diplomat, Trust Analyst, Negotiator, Adversary Model) | ✓ COMPLETE |
 | SC2.8 | Truce Mode (alternative optimization landscape) | ✓ COMPLETE |
-| SC2.9 | EXP-SC2-001: Kernel Integration Test | PLANNED |
-| SC2.10 | EXP-SC2-002: Truce Mode Test | PLANNED |
-| SC2.11 | EXP-SC2-003: Trust Dynamics Test | PLANNED |
-| SC2.12 | EXP-SC2-004: Companion Mode Test | PLANNED |
+| SC2.9 | EXP-SC2-001: Kernel Integration Test | ✓ COMPLETE |
+| SC2.10 | EXP-SC2-002: Truce Mode Test | ✓ COMPLETE |
+| SC2.11 | EXP-SC2-003: Trust Dynamics Test | ✓ COMPLETE |
+| SC2.12 | EXP-SC2-004: Companion Mode Test | ✓ COMPLETE |
