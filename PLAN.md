@@ -819,3 +819,370 @@ Wire the new layers into the existing attractor dynamics.
 - Resource Manager correctly detects starvation when leases exceed budget
 
 **Conclusion:** Substrate_Echo evolved from "a model with memory" to a **persistent adaptive system with perception, cognition, resource allocation, and self-monitoring**.
+
+---
+
+## Phase SC2: StarCraft II Embodiment
+
+### Overview
+
+Use StarCraft II as a synthetic ecology for testing cognition under pressure.
+
+**The objective is not to build a StarCraft bot.**
+
+The objective is:
+
+> Use StarCraft II as a synthetic ecology for testing cognition under pressure.
+
+SC2 provides a dense environment for evaluating:
+- Partial observation
+- Competing goals
+- Delayed consequences
+- Resource allocation
+- Spatial reasoning
+- Opponent modeling
+- Deception
+- Adaptation
+
+These map directly onto existing Substrate_Echo primitives.
+
+### Core Architecture Principle
+
+The SC2 client should be another embodiment.
+
+The kernel should not know it is playing a game.
+
+```text
+                    Substrate Kernel
+
+                    World Model
+                         |
+              ------------------------
+              |                      |
+       Strategic Layer        Tactical Layer
+
+              |
+        Attractor Landscape
+
+              |
+        Goal Competition
+
+              |
+        Action Trajectory
+
+
+                         |
+                         v
+
+                  SC2 Embodiment Client
+```
+
+The SC2 adapter translates abstract intent into game actions.
+
+Example:
+
+Kernel:
+```
+Secure expansion location
+```
+
+SC2 Client:
+```
+Build Command Center
+Assign workers
+Defend position
+```
+
+The kernel receives experience, not game mechanics.
+
+### SC2 Embodiment Interface
+
+**Client → Kernel:**
+
+```python
+Observation(
+    resources,
+    units,
+    visible_enemy,
+    map_state,
+    production_state,
+    threats,
+    uncertainty
+)
+
+EmbodimentState(
+    available_actions,
+    current_capabilities,
+    latency,
+    execution_constraints
+)
+```
+
+**Kernel → Client:**
+
+```python
+CognitiveState(
+    action,
+    confidence,
+    prediction,
+    reasoning_state,
+    resource_allocation,
+    goal_priority
+)
+```
+
+The client decides how to execute the action.
+
+### SC2 as an Attractor Environment
+
+A match naturally creates competing attractors.
+
+**Economy Attractor:**
+- State: workers, minerals, gas, production, expansions
+- Desired basin: stable economic growth
+
+**Military Attractor:**
+- State: army composition, position, upgrades, enemy threat
+- Desired basin: advantageous engagement state
+
+**Information Attractor:**
+- State: scouting, enemy uncertainty, hidden information
+- Desired basin: reduced uncertainty
+
+**Survival Attractor:**
+- State: base integrity, defenses, incoming threats
+- Desired basin: avoid losing condition
+
+The substrate question becomes:
+
+> Which basin deserves cognitive energy right now?
+
+This directly extends the cognitive budget experiments.
+
+### Trickster StoryTeller Integration
+
+The Trickster role is especially interesting in SC2 because human strategy is not only about optimal actions.
+
+It is about manipulating opponent beliefs.
+
+The normal optimization question:
+> What action maximizes my outcome?
+
+The Trickster question:
+> What does my opponent believe I am going to do?
+
+**Trickster Strategy Layer:**
+
+The Trickster is not a personality controlling decisions.
+
+It is a belief-space manipulation layer.
+
+```text
+Substrate Kernel
+      |
+      v
+Strategic Intent
+      |
+      v
+Trickster / Narrative Layer
+      |
+      v
+Opponent Perception Management
+```
+
+**Examples:**
+
+*Fake Pressure:*
+- Reality: Build defensive economy
+- Opponent belief: Early attack incoming
+- Result: Opponent spends resources defending a threat that does not exist
+
+*Hidden Expansion:*
+- Reality: Economic growth
+- Opponent belief: Aggression preparation
+
+*Deliberate Scouting Signal:*
+- Show information intentionally
+- Opponent updates their model
+- The substrate modifies the opponent's attractor landscape
+
+This connects directly to:
+- Influence Pillar
+- Distortion Pillar
+- Narrative Expansion Layer
+
+### Chat Layer Design
+
+The chat personality should be downstream from strategy.
+
+Incorrect:
+```
+Chat personality → Decision making
+```
+
+Preferred:
+```
+Strategy → Intent → Narrative Layer → Trickster StoryTeller → Chat Output
+```
+
+The kernel decides:
+> Increase opponent uncertainty.
+
+The StoryTeller decides:
+> How should this be expressed?
+
+**Examples:**
+
+Successful deception:
+> "Interesting. You defended the door I never intended to enter."
+
+Failed strategy:
+> "The goblin engineers would like to clarify that the bridge collapse was an intentional feature."
+
+Successful trap:
+> "Congratulations. You have discovered the carefully placed hole."
+
+The banter is an expression of strategy, not random personality.
+
+### Council Integration
+
+SC2 naturally creates competing internal advisors.
+
+Example:
+```
+Council:
+  Strategist: Expand now.
+  Tactician: Attack now.
+  Scout: Enemy technology unknown.
+  Trickster: Opponent expects aggression.
+  Risk Manager: Confidence too low.
+```
+
+Flow:
+```text
+Council → Proposals → Executive Function → Resource Allocation → SC2 Embodiment
+```
+
+### Required Addition: Opponent Model
+
+SC2 introduces another adaptive entity.
+
+The current architecture has:
+```
+World Model
+```
+
+This should become:
+```
+World Model
+    +---- Environment Model
+    +---- Self Model
+    +---- Other Agent Model
+```
+
+The opponent is not just part of the environment.
+
+The opponent actively changes the environment.
+
+The substrate must model:
+- What the opponent knows
+- What the opponent believes
+- Predicted actions
+- Confidence in predictions
+- Possible deception
+
+### Experiments
+
+#### EXP-SC2-001: Cognitive Baseline
+
+No Trickster layer.
+
+Measure:
+- Win/loss
+- Resource efficiency
+- Prediction accuracy
+- Attractor stability
+- Goal switching
+
+Question:
+> Does the substrate maintain coherent cognition?
+
+#### EXP-SC2-002: Resource Competition
+
+Force competing goals:
+- Expand economy
+- Build military
+- Scout opponent
+- Defend base
+
+Measure:
+- Tunnel vision
+- Starvation
+- Recovery after mistakes
+- Executive prioritization
+
+#### EXP-SC2-003: Trickster Emergence
+
+Introduce:
+- Influence reward
+- Opponent uncertainty metric
+- Belief modeling
+
+Measure:
+> Does deception emerge naturally?
+
+#### EXP-SC2-004: Embodiment Transfer
+
+Train strategic concepts in SC2:
+- Resource scarcity
+- Territory control
+- Prediction
+- Competition
+- Uncertainty
+
+Expose the substrate to another environment.
+
+Question:
+> Did the substrate learn StarCraft, or did it learn general strategic structure?
+
+### Relation to EXP-SUB-005
+
+EXP-SUB-005 established:
+- Multiple embodiments can share one kernel
+- Executive function can manage competing goals
+- Resource allocation prevents collapse
+- Council can monitor health
+- Attractor structure adapts under pressure
+
+SC2 is the natural next stress test.
+
+The progression:
+```
+EXP-SUB-001  Can structure emerge?
+EXP-SUB-002  Can structure self-reinforce?
+EXP-SUB-003  Can structure differentiate?
+EXP-SUB-004  Can structure abstract?
+EXP-SUB-005  Can structure survive conflict?
+EXP-SC2      Can structure anticipate another structure?
+```
+
+The goal is not initially to beat human players.
+
+The first success criterion is:
+
+> Can the substrate maintain coherent cognition while embedded in a hostile, partially observed, adversarial environment?
+
+### Implementation Plan
+
+| Phase | Component | Status |
+|-------|-----------|--------|
+| SC2.1 | SC2 Game Connection (pysc2/sc2) | PLANNED |
+| SC2.2 | Observation Encoder (game state → 16D vectors) | PLANNED |
+| SC2.3 | Action Decoder (abstract intent → game actions) | PLANNED |
+| SC2.4 | Opponent Model (belief tracking) | PLANNED |
+| SC2.5 | Trickster Layer (deception strategy) | PLANNED |
+| SC2.6 | Council Integration (competing advisors) | PLANNED |
+| SC2.7 | EXP-SC2-001: Cognitive Baseline | PLANNED |
+| SC2.8 | EXP-SC2-002: Resource Competition | PLANNED |
+| SC2.9 | EXP-SC2-003: Trickster Emergence | PLANNED |
+| SC2.10 | EXP-SC2-004: Embodiment Transfer | PLANNED |

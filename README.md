@@ -184,6 +184,25 @@ The server boundary forced the missing cognitive layers to become explicit. Subs
 | EXP-EXT-005 | Physics A>C>B | Domain-specific trust works |
 | EXP-SOC-001 | Divergence 0.085 stable | Persona anchoring prevents convergence |
 
+### StarCraft II Embodiment (PLANNED)
+
+Using SC2 as a synthetic ecology for testing cognition under pressure.
+
+**Experiment Progression:**
+```
+EXP-SUB-001  Can structure emerge?
+EXP-SUB-002  Can structure self-reinforce?
+EXP-SUB-003  Can structure differentiate?
+EXP-SUB-004  Can structure abstract?
+EXP-SUB-005  Can structure survive conflict?
+EXP-SC2      Can structure anticipate another structure?
+```
+
+**First Success Criterion:**
+> Can the substrate maintain coherent cognition while embedded in a hostile, partially observed, adversarial environment?
+
+See [PLAN.md](PLAN.md) for full SC2 architecture and experiment details.
+
 ## Quick Start
 
 ```bash
