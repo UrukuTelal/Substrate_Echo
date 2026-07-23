@@ -2,6 +2,33 @@
 
 All notable changes to Substrate_Echo will be documented in this file.
 
+## [0.6.0] - 2026-07-21
+
+### Added — Substrate Kernel
+- `kernel/__init__.py`: SubstrateKernel cognitive backend with two-plane architecture
+- `kernel/api.py`: Control Plane (REST) + Cognitive Plane (WebSocket)
+- `kernel/client.py`: In-process and streaming client libraries
+- State schema: Observation, Goal, Reward, Action, Prediction, EmbodimentState, CognitiveState
+- Multiple embodiments share one kernel (cross-embodiment learning)
+
+### Added — Basin Topology
+- `dynamics/basin_topology.py`: BasinMetrics, AttractorState with plasticity properties
+- Basin depth (energy contrast), volume (isolation), entropy (diversity), balance (dominance)
+- Attractor plasticity: stability, plasticity, novelty, confidence, access tracking
+- Structural event detection: births, deaths, merges, splits
+
+### Added — Abstraction Engine
+- `dynamics/abstraction.py`: AttractorCorrelation, AbstractionEngine, MetaAttractor, CognitiveBudget
+- Time-proximity co-activation correlation between attractors
+- Meta-attractor creation from correlated clusters (hierarchy building)
+- Finite cognitive budget (competition for resources)
+
+### Experiments
+- EXP-SUB-002: Closed feedback loop — 2→14 attractors, coherence 0.202→0.924, self-reinforcing
+- EXP-SUB-003: Basin topology — 16 attractors, depth 0.457, plasticity分化, 16 births/0 deaths
+- EXP-SUB-004: Abstraction hierarchy — 4 meta-attractors from correlated base attractors
+- Demo: two embodiments (desktop + robot) sharing one cognitive kernel
+
 ## [0.5.0] - 2026-07-21
 
 ### Added
