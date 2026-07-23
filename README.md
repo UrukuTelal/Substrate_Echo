@@ -184,18 +184,33 @@ The server boundary forced the missing cognitive layers to become explicit. Subs
 | EXP-EXT-005 | Physics A>C>B | Domain-specific trust works |
 | EXP-SOC-001 | Divergence 0.085 stable | Persona anchoring prevents convergence |
 
-### StarCraft II Embodiment (PLANNED)
+### StarCraft II Embodiment (COMPLETE ✓)
 
-Using SC2 as a synthetic ecology for testing cognition under pressure.
+SC2 is now a controllable external environment for Substrate_Echo.
+
+**Embodiment Boundary Validated:**
+- Observation Encoder: SC2 game state → 16D substrate vectors
+- Action Decoder: Abstract intent → SC2 commands
+- Trust Layer: Dynamic trust attractor for multi-agent interactions
+- Communication Policy: Selective information sharing
+- Trickster StoryTeller: Narrative/social intelligence
+- SC2 Council: Diplomat, Trust Analyst, Negotiator, Adversary Model
+- Truce Mode: Alternative optimization landscape for cooperative play
+
+**Connection Verified:**
+```text
+500 steps completed successfully against Easy AI
+9 Melee maps installed
+```
 
 **Experiment Progression:**
 ```
-EXP-SUB-001  Can structure emerge?
-EXP-SUB-002  Can structure self-reinforce?
-EXP-SUB-003  Can structure differentiate?
-EXP-SUB-004  Can structure abstract?
-EXP-SUB-005  Can structure survive conflict?
-EXP-SC2      Can structure anticipate another structure?
+EXP-SUB-001  Can structure emerge?                    ✓
+EXP-SUB-002  Can structure self-reinforce?            ✓
+EXP-SUB-003  Can structure differentiate?             ✓
+EXP-SUB-004  Can structure abstract?                  ✓
+EXP-SUB-005  Can structure survive conflict?          ✓
+EXP-SC2      Can structure anticipate another structure?  ← NEXT
 ```
 
 **First Success Criterion:**

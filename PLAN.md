@@ -822,7 +822,7 @@ Wire the new layers into the existing attractor dynamics.
 
 ---
 
-## Phase SC2: StarCraft II Embodiment
+## Phase SC2: StarCraft II Embodiment — COMPLETE ✓
 
 ### Overview
 
@@ -1176,13 +1176,15 @@ The first success criterion is:
 
 | Phase | Component | Status |
 |-------|-----------|--------|
-| SC2.1 | SC2 Game Connection (pysc2/sc2) | PLANNED |
-| SC2.2 | Observation Encoder (game state → 16D vectors) | PLANNED |
-| SC2.3 | Action Decoder (abstract intent → game actions) | PLANNED |
-| SC2.4 | Opponent Model (belief tracking) | PLANNED |
-| SC2.5 | Trickster Layer (deception strategy) | PLANNED |
-| SC2.6 | Council Integration (competing advisors) | PLANNED |
-| SC2.7 | EXP-SC2-001: Cognitive Baseline | PLANNED |
-| SC2.8 | EXP-SC2-002: Resource Competition | PLANNED |
-| SC2.9 | EXP-SC2-003: Trickster Emergence | PLANNED |
-| SC2.10 | EXP-SC2-004: Embodiment Transfer | PLANNED |
+| SC2.1 | SC2 Game Connection (sc2 library) | ✓ COMPLETE |
+| SC2.2 | Observation Encoder (game state → 16D vectors) | ✓ COMPLETE |
+| SC2.3 | Action Decoder (abstract intent → game actions) | ✓ COMPLETE |
+| SC2.4 | Trust Evaluation Layer (dynamic attractor) | ✓ COMPLETE |
+| SC2.5 | Communication Policy (selective sharing) | ✓ COMPLETE |
+| SC2.6 | Trickster StoryTeller (narrative layer) | ✓ COMPLETE |
+| SC2.7 | SC2 Council (Diplomat, Trust Analyst, Negotiator, Adversary Model) | ✓ COMPLETE |
+| SC2.8 | Truce Mode (alternative optimization landscape) | ✓ COMPLETE |
+| SC2.9 | EXP-SC2-001: Kernel Integration Test | PLANNED |
+| SC2.10 | EXP-SC2-002: Truce Mode Test | PLANNED |
+| SC2.11 | EXP-SC2-003: Trust Dynamics Test | PLANNED |
+| SC2.12 | EXP-SC2-004: Companion Mode Test | PLANNED |

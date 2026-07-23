@@ -2,6 +2,29 @@
 
 All notable changes to Substrate_Echo will be documented in this file.
 
+## [0.12.0] - 2026-07-23
+
+### Added — SC2 Embodiment (COMPLETE ✓)
+SC2 is now a controllable external environment for Substrate_Echo.
+
+**Embodiment Layer:**
+- `embodiments/sc2/observation_encoder.py`: SC2 game state → 16D substrate vectors
+- `embodiments/sc2/action_decoder.py`: Abstract intent → SC2 commands
+- `embodiments/sc2/sc2_bot.py`: Main SC2 embodiment adapter (TESTED - 500 steps)
+- `embodiments/sc2/adapter.py`: SC2 ↔ Substrate Kernel bridge
+
+**Social/Cognitive Layer:**
+- `embodiments/sc2/trust.py`: Dynamic trust attractor for multi-agent interactions
+- `embodiments/sc2/communication.py`: Selective information sharing
+- `embodiments/sc2/trickster.py`: Narrative/social intelligence layer
+- `embodiments/sc2/council_sc2.py`: Diplomat, Trust Analyst, Negotiator, Adversary Model
+- `embodiments/sc2/truce_mode.py`: Alternative optimization landscape for cooperative play
+
+**Connection Verified:**
+- 500 steps completed successfully against Easy AI
+- 9 Melee maps installed at `C:\Program Files (x86)\StarCraft II\Maps\Melee\`
+- sc2 library (v0.11.2) with protobuf 3.20.3 for compatibility
+
 ## [0.11.0] - 2026-07-23
 
 ### Added — Competing Pressures Stress Test (EXP-SUB-005)
