@@ -136,7 +136,7 @@ class CommunicationPolicyLayer:
     def should_send(self, receiver_id: str, category: InfoCategory,
                     info_value: float = 0.5) -> bool:
         """Determine if information should be sent to receiver."""
-        policy = self._policies.get(category, self.DEFAULT_POLICIS[InfoCategory.UNKNOWN])
+        policy = self._policies.get(category, self.DEFAULT_POLICIES[InfoCategory.UNKNOWN])
         
         # Get trust level
         trust = 0.5
@@ -159,7 +159,7 @@ class CommunicationPolicyLayer:
         If truth is provided and deception is allowed,
         may send a false version based on trust level.
         """
-        policy = self._policies.get(category, self.DEFAULT_POLICIS[InfoCategory.UNKNOWN])
+        policy = self._policies.get(category, self.DEFAULT_POLICIES[InfoCategory.UNKNOWN])
         
         # Decide whether to deceive
         is_deception = False
