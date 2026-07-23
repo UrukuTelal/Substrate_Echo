@@ -14,6 +14,7 @@ from .pillar_coupling import PillarCoupling, PillarCouplingConfig, PILLAR_NAMES
 from .vortex_dynamics import VortexDynamics, VortexConfig, Vortex
 from .topology_transitions import TopologyManager, TransitionConfig, TopologyTransition, TransitionType
 from .basin_topology import BasinTopology, BasinMetrics, BasinEvent, AttractorState
+from .abstraction import AbstractionEngine, MetaAttractor, AttractorCorrelation, CognitiveBudget
 
 __all__ = [
     "FieldEvolver", "EvolutionConfig", "SolverType",
@@ -28,4 +29,5 @@ __all__ = [
     "VortexDynamics", "VortexConfig", "Vortex",
     "TopologyManager", "TransitionConfig", "TopologyTransition", "TransitionType",
     "BasinTopology", "BasinMetrics", "BasinEvent", "AttractorState",
+    "AbstractionEngine", "MetaAttractor", "AttractorCorrelation", "CognitiveBudget",
 ]
