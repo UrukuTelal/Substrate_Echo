@@ -248,7 +248,7 @@ class SubstrateKernel:
         self._apply_rewards()
 
         # Executive function: manage goals, attention, priorities
-        exec_state = self.executive.tick(obs)
+        exec_state = self.executive.tick(obs, current_tick=self._tick)
 
         # Generate action + prediction (influenced by executive attention)
         action = self._generate_action(state)

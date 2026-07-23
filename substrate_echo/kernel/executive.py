@@ -164,31 +164,42 @@ class GoalGenerator:
     def __init__(self):
         self._next_id = 1000
         self.rules: List[Callable] = [self._safety_rule]
+        self._safety_cooldown: Dict[str, float] = {}  # embodiment_id -> last_safety_tick
+        self._cooldown_ticks = 20  # Don't re-create safety goals within N ticks
 
-    def check(self, observation: Any) -> List[GoalState]:
+    def check(self, observation: Any, current_tick: int = 0) -> List[GoalState]:
         new_goals = []
         for rule in self.rules:
-            new_goals.extend(rule(observation))
+            new_goals.extend(rule(observation, current_tick))
         return new_goals
 
-    def _safety_rule(self, obs: Any) -> List[GoalState]:
+    def _safety_rule(self, obs: Any, current_tick: int = 0) -> List[GoalState]:
         goals = []
         vec = obs.to_array()
-        for i, v in enumerate(vec):
-            if v < 0.05 or v > 0.95:
-                goals.append(GoalState(
-                    id=self._next_id,
-                    target=[0.5] * len(vec),
-                    description=f"Safety: dim {i} at extreme ({v:.3f})",
-                    embodiment_id=obs.embodiment_id,
-                    status=GoalStatus.ACTIVE,
-                    tier=GoalTier.SAFETY,
-                    urgency=0.9, importance=0.9, confidence=1.0,
-                    expected_value=0.8, resource_cost=0.1,
-                    created_at=time.time(), activated_at=time.time(),
-                ))
-                self._next_id += 1
-                break
+        emb_id = obs.embodiment_id
+
+        # Check cooldown
+        last_tick = self._safety_cooldown.get(emb_id, -999)
+        if current_tick - last_tick < self._cooldown_ticks:
+            return goals
+
+        # Only create if ANY dimension is extreme (not per-dimension)
+        has_extreme = any(v < 0.05 or v > 0.95 for v in vec)
+        if has_extreme:
+            extreme_dims = [i for i, v in enumerate(vec) if v < 0.05 or v > 0.95]
+            goals.append(GoalState(
+                id=self._next_id,
+                target=[0.5] * len(vec),
+                description=f"Safety: dims {extreme_dims[:3]} extreme ({len(extreme_dims)} total)",
+                embodiment_id=emb_id,
+                status=GoalStatus.ACTIVE,
+                tier=GoalTier.SAFETY,
+                urgency=0.9, importance=0.9, confidence=1.0,
+                expected_value=0.8, resource_cost=0.1,
+                created_at=time.time(), activated_at=time.time(),
+            ))
+            self._next_id += 1
+            self._safety_cooldown[emb_id] = current_tick
         return goals
 
 
@@ -248,10 +259,11 @@ class ExecutiveFunction:
 
     def tick(self, observation: Any = None,
              attractor_novelty: Optional[Dict[int, float]] = None,
-             prediction_errors: Optional[Dict[int, float]] = None
+             prediction_errors: Optional[Dict[int, float]] = None,
+             current_tick: int = 0
              ) -> ExecutiveState:
         if observation:
-            for g in self.generator.check(observation):
+            for g in self.generator.check(observation, current_tick):
                 self.add_goal(g)
 
         goals_list = list(self._goals.values())

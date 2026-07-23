@@ -2,6 +2,19 @@
 
 All notable changes to Substrate_Echo will be documented in this file.
 
+## [0.11.0] - 2026-07-23
+
+### Added — Competing Pressures Stress Test (EXP-SUB-005)
+- `scripts/exp_sub_005_competing_pressures.py`: Multi-embodiment stress test
+- 3 embodiments: desktop (answer request), robot (avoid obstacle), simulation (explore novelty)
+- 4 stress scenarios: resource squeeze, conflicting goals, prediction degradation, resource release
+- 6/6 architecture checks passing
+
+### Fixed
+- Goal explosion: safety generator now uses per-embodiment cooldown (20-tick window)
+- Council health decay: exponential decay with recovery (was linear collapse to 0)
+- Trajectory-based observations: cyclical patterns replace pure noise
+
 ## [0.10.0] - 2026-07-22
 
 ### Added — Integration Tests (S13-S14)

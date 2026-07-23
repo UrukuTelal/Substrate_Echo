@@ -379,13 +379,21 @@ class Council:
 
         n_recommendations = sum(len(r.recommendations) for r in self._reports)
 
+        # Health decays with repeated warnings, but recovers when stable
         health = 1.0
-        for r in self._reports[-10:]:
-            if r.severity == AuditSeverity.WARNING:
-                health -= 0.1
-            elif r.severity == AuditSeverity.CRITICAL:
-                health -= 0.3
-        health = max(0.0, health)
+        recent_warnings = sum(1 for r in self._reports[-20:] if r.severity == AuditSeverity.WARNING)
+        recent_criticals = sum(1 for r in self._reports[-20:] if r.severity == AuditSeverity.CRITICAL)
+
+        # Warnings reduce health gradually (not linearly)
+        if recent_warnings > 0:
+            health *= max(0.3, 1.0 - (recent_warnings * 0.05))
+        if recent_criticals > 0:
+            health *= max(0.1, 1.0 - (recent_criticals * 0.15))
+
+        # Recovery: if no issues in last 10 reports, health improves
+        last_10 = self._reports[-10:] if len(self._reports) >= 10 else self._reports
+        if all(r.severity == AuditSeverity.INFO for r in last_10):
+            health = min(1.0, health + 0.1)
 
         return CouncilState(
             last_audit_tick=self._reports[-1].tick if self._reports else 0,
