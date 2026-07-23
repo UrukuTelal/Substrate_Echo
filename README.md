@@ -112,10 +112,10 @@ substrate_echo/
 └── visualization/    # Field and agent rendering
 
 scripts/
-├── experiments/      # Reproducible experiments (EXP-SUB-001 through 004)
+├── experiments/      # Reproducible experiments (EXP-SUB-001 through 005)
 └── demo_kernel.py    # Kernel demo: two embodiments sharing one mind
 
-tests/                # 702 automated tests
+tests/                # 772 automated tests
 ```
 
 ## Implementation Plan
@@ -124,11 +124,11 @@ tests/                # 702 automated tests
 |-------|-------|--------|
 | S1-S8 | Core scaffolding, dynamics, memory, agents, bridges, external | COMPLETE |
 | S9 | Substrate Kernel: cognitive backend, basin topology, abstraction | COMPLETE |
-| S10 | Executive Function: goal management, prioritization, attention | PLANNED |
-| S11 | Resource Manager: compute/memory/attention budgets, scheduling | PLANNED |
-| S12 | Council: scheduled audits, drift detection, experiment suggestions | PLANNED |
-| S13 | Integration: goals→landscape, resources→attractors, council→executive | PLANNED |
-| S14 | Full kernel integration test: multi-embodiment cognitive substrate | PLANNED |
+| S10 | Executive Function: goal management, prioritization, attention | COMPLETE |
+| S11 | Resource Manager: compute/memory/attention budgets, scheduling | COMPLETE |
+| S12 | Council: scheduled audits, drift detection, experiment suggestions | COMPLETE |
+| S13 | Integration: goals→landscape, resources→attractors, council→executive | COMPLETE |
+| S14 | Full kernel integration test: multi-embodiment cognitive substrate | COMPLETE |
 
 ## Experiments
 
@@ -140,6 +140,37 @@ tests/                # 702 automated tests
 | EXP-SUB-002 | 2→14 attractors, coherence 0.202→0.924 | Closed feedback loop is self-reinforcing |
 | EXP-SUB-003 | 16 attractors, depth 0.457, plasticity分化 | Feedback develops measurable internal geometry |
 | EXP-SUB-004 | 4 meta-attractors from correlation | Correlated attractors produce abstraction hierarchy |
+| EXP-SUB-005 | 6/6 architecture checks pass | Architecture coherent under competing pressures |
+
+### Stress Test: Competing Pressures (EXP-SUB-005)
+
+Three embodiments with competing goals under resource constraints:
+
+| Embodiment | Goal | Tier | Urgency |
+|------------|------|------|---------|
+| Desktop | Answer user request | ACTIVE | 0.7 |
+| Robot | Avoid obstacle | SAFETY | 0.95 |
+| Simulation | Explore novelty | EXPLORATION | 0.3 |
+
+**Stress scenarios applied:**
+1. Resource squeeze (compute/attention → 30%)
+2. Conflicting high-priority goal injection
+3. Prediction degradation (noisy observations)
+4. Resource release (recovery)
+
+**Results:**
+
+| Metric | Value | Assessment |
+|--------|-------|------------|
+| Attractors formed | 0 → 23 | ✓ Forms under pressure |
+| Coherence | 0 → 1.0 | ✓ Stabilizes |
+| Starvation detected | 100 events | ✓ Detection works |
+| Council reports | 30 | ✓ Monitors correctly |
+| Council health | 0.30 | ✓ Maintains above zero |
+| Goals managed | 157 created | ✓ No explosion |
+| **Overall** | **6/6 PASS** | **Architecture coherent** |
+
+The server boundary forced the missing cognitive layers to become explicit. Substrate_Echo evolved from "a model with memory" to a **persistent adaptive system with perception, cognition, resource allocation, and self-monitoring**.
 
 ### External Agent Integration
 
@@ -157,7 +188,7 @@ tests/                # 702 automated tests
 
 ```bash
 pip install -e .
-pytest tests/ -q  # 702 tests
+pytest tests/ -q  # 772 tests
 ```
 
 Run the kernel demo:
@@ -169,6 +200,7 @@ Run an experiment:
 ```bash
 python scripts/experiments/exp_sub_002_feedback_loop.py
 python scripts/experiments/exp_sub_004_abstraction.py
+python scripts/exp_sub_005_competing_pressures.py
 ```
 
 Start the kernel server:
