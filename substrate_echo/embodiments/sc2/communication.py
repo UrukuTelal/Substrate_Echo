@@ -123,6 +123,13 @@ class CommunicationPolicyLayer:
             can_deceive=False,
             deception_cost=0.0,
         ),
+        InfoCategory.UNKNOWN: CommunicationPolicy(
+            category=InfoCategory.UNKNOWN,
+            min_trust=0.5,
+            value_weight=1.0,
+            can_deceive=False,
+            deception_cost=0.0,
+        ),
     }
     
     def __init__(self, trust_layer=None):
