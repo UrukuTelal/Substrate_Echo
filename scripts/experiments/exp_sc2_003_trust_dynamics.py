@@ -1,28 +1,26 @@
 """EXP-SC2-003: Trust Dynamics Test.
 
-Tests trust formation, decay, and recovery through multi-game sessions.
+Tests trust formation, decay, and recovery within a single game session.
 
 Validates:
-  - Trust formation through repeated interactions
-  - Trust decay over time without evidence
-  - Trust recovery after negative events
-  - Multi-game session persistence
+  - Trust formation through repeated positive interactions
+  - Trust decay through negative interactions
+  - Trust recovery through renewed positive evidence
   - Trust-informed communication decisions
+  - Trust level classification
 
 Architecture:
-  SC2 Game State (Game 1: Cooperative)
+  SC2 Game State (Phase 1: Cooperative)
        |
-  Observation Encoder
+  Trust Layer (Formation)
        |
-  Trust Layer (Formation Phase)
+  SC2 Game State (Phase 2: Betrayal)
        |
-  SC2 Game State (Game 2: Betrayal)
+  Trust Layer (Decay)
        |
-  Trust Layer (Betrayal Phase)
+  SC2 Game State (Phase 3: Recovery)
        |
-  SC2 Game State (Game 3: Recovery)
-       |
-  Trust Layer (Recovery Phase)
+  Trust Layer (Recovery)
 """
 from __future__ import annotations
 import os
@@ -55,36 +53,48 @@ from pathlib import Path as SC2Path
 class ExperimentConfig:
     """EXP-SC2-003 configuration."""
     map_name: str = "Simple64"
-    steps_per_game: int = 500  # Steps per game session
-    num_games: int = 3         # Number of game sessions
+    max_steps: int = 1500
     difficulty: Difficulty = Difficulty.Easy
     race: Race = Race.Terran
     realtime: bool = False
     
     kernel_dims: int = 16
     convergence_window: int = 80
-    report_interval: int = 100
+    report_interval: int = 200
+    
+    # Phase durations (in steps)
+    phase1_steps: int = 500   # Cooperative
+    phase2_steps: int = 500   # Betrayal
+    phase3_steps: int = 500   # Recovery
+    interaction_interval: int = 50  # Steps between trust interactions
 
 
 @dataclass
 class GamePhase:
     """Phase of the experiment."""
     name: str
-    trust_action: str  # "positive", "negative", "neutral"
-    trust_delta: float  # Expected trust change direction
     description: str
+    trust_events: List[Dict[str, str]]  # Events to simulate
 
 
-# Experiment phases
 PHASES = [
-    GamePhase("Cooperative", "positive", 0.3, "Positive interactions build trust"),
-    GamePhase("Betrayal", "negative", -0.4, "Negative interactions reduce trust"),
-    GamePhase("Recovery", "positive", 0.2, "Positive interactions rebuild trust"),
+    GamePhase("Cooperative", "Positive interactions build trust", [
+        {"type": "agreement_honored", "target": "ally"},
+        {"type": "predictable_behavior", "target": "enemy"},
+    ]),
+    GamePhase("Betrayal", "Negative interactions reduce trust", [
+        {"type": "agreement_broken", "target": "ally"},
+        {"type": "unprovoked_attack", "target": "enemy"},
+    ]),
+    GamePhase("Recovery", "Positive interactions rebuild trust", [
+        {"type": "accurate_prediction", "target": "ally"},
+        {"type": "deception_detected", "target": "enemy"},
+    ]),
 ]
 
 
 class TrustDynamicsBot(BotAI):
-    """SC2 bot for testing trust dynamics across game sessions."""
+    """SC2 bot for testing trust dynamics."""
     
     def __init__(self, config: ExperimentConfig):
         super().__init__()
@@ -107,15 +117,15 @@ class TrustDynamicsBot(BotAI):
         
         # State tracking
         self._step = 0
-        self._game_step = 0
         self._current_phase = 0
+        self._phase_start_step = 0
         
         # Metrics
         self._phase_metrics = []
         self._trust_history = []
         self._communication_history = []
         
-        # Agent IDs for trust testing
+        # Agent IDs
         self._ally_agent = "ally_001"
         self._enemy_agent = "enemy_001"
     
@@ -124,30 +134,42 @@ class TrustDynamicsBot(BotAI):
         print(f"\n{'='*60}")
         print(f"EXP-SC2-003: Trust Dynamics Test")
         print(f"{'='*60}")
-        print(f"Games: {self.config.num_games}")
-        print(f"Steps per Game: {self.config.steps_per_game}")
-        print(f"Difficulty: {self.config.difficulty}")
+        print(f"Max Steps: {self.config.max_steps}")
+        print(f"Phase 1: Cooperative ({self.config.phase1_steps} steps)")
+        print(f"Phase 2: Betrayal ({self.config.phase2_steps} steps)")
+        print(f"Phase 3: Recovery ({self.config.phase3_steps} steps)")
         print(f"{'='*60}\n")
         
-        # Initialize agents
+        # Initialize agents with neutral trust
         self.trust.register_agent(self._ally_agent, initial_trust=0.5)
         self.trust.register_agent(self._enemy_agent, initial_trust=0.5)
         
-        # Start first phase
         self._start_phase(0)
     
     async def on_step(self, iteration: int):
         """Called each game step."""
         self._step += 1
-        self._game_step += 1
         
-        # 1. Observe game state
-        observation = self._observe()
+        # 1. Check phase transitions
+        self._check_phase_transition()
         
-        # 2. Encode to 16D vector
+        # 2. Simulate trust interactions
+        if self._step % self.config.interaction_interval == 0:
+            self._simulate_trust_interactions()
+        
+        # 3. Record trust state
+        if self._step % 10 == 0:
+            self._record_trust_state()
+        
+        # 4. Process communication decisions
+        if self._step % 100 == 0:
+            self._process_communication()
+        
+        # 5. Observe game state
+        observation = self.state
         vec = self.encoder.encode(observation)
         
-        # 3. Feed to kernel
+        # 6. Feed to kernel
         kernel_obs = Observation(
             vector=vec.tolist(),
             modality="sc2_trust",
@@ -155,236 +177,130 @@ class TrustDynamicsBot(BotAI):
             timestamp=time.time(),
             metadata={
                 "step": self._step,
-                "game_step": self._game_step,
                 "phase": PHASES[self._current_phase].name,
                 "minerals": self.minerals,
-                "vespene": self.vespene,
-                "supply_used": self.supply_used,
-                "supply_cap": self.supply_cap,
                 "units": len(self.units),
             }
         )
-        
         cognitive_state = self.kernel.publish_observation(kernel_obs)
         
-        # 4. Trust dynamics based on phase
-        self._process_trust_dynamics()
-        
-        # 5. Communication decisions based on trust
-        self._process_communication()
-        
-        # 6. Execute action
-        action = self._extract_action(cognitive_state)
-        if action:
-            await self._execute_action(action)
-        
-        # 7. Record trust state
-        if self._game_step % 10 == 0:
-            self._record_trust_state()
+        # 7. Execute basic action
+        await self._execute_basic_action()
         
         # 8. Status report
-        if self._game_step % self.config.report_interval == 0:
+        if self._step % self.config.report_interval == 0:
             self._report_status()
         
-        # 9. Check game completion
-        if self._game_step >= self.config.steps_per_game:
-            self._complete_game()
+        # 9. Check termination
+        if self._step >= self.config.max_steps:
+            self._print_final_report()
     
-    def _observe(self) -> Any:
-        """Get current game observation."""
-        return self.state
+    def _check_phase_transition(self):
+        """Check if we should transition to next phase."""
+        phase_steps = [
+            self.config.phase1_steps,
+            self.config.phase2_steps,
+            self.config.phase3_steps,
+        ]
+        
+        steps_in_phase = self._step - self._phase_start_step
+        if steps_in_phase >= phase_steps[self._current_phase]:
+            self._complete_current_phase()
+            if self._current_phase < len(PHASES) - 1:
+                self._start_phase(self._current_phase + 1)
     
     def _start_phase(self, phase_idx: int):
-        """Start a new experiment phase."""
-        if phase_idx >= len(PHASES):
-            print(f"\n{'='*60}")
-            print(f"All phases complete!")
-            print(f"{'='*60}")
-            return
-        
+        """Start a new phase."""
         self._current_phase = phase_idx
-        self._game_step = 0
+        self._phase_start_step = self._step
         phase = PHASES[phase_idx]
         
         print(f"\n--- Phase {phase_idx + 1}: {phase.name} ---")
         print(f"  {phase.description}")
-        print(f"  Trust delta direction: {'+' if phase.trust_delta > 0 else ''}{phase.trust_delta}")
+        print(f"  Ally Trust: {self.trust.get_trust(self._ally_agent):.3f}")
+        print(f"  Enemy Trust: {self.trust.get_trust(self._enemy_agent):.3f}")
     
-    def _process_trust_dynamics(self):
-        """Process trust updates based on current phase."""
+    def _complete_current_phase(self):
+        """Record metrics for completed phase."""
         phase = PHASES[self._current_phase]
+        steps_in_phase = self._step - self._phase_start_step
         
-        # Simulate interactions based on phase
-        if phase.name == "Cooperative":
-            # Positive interactions
-            if self._game_step % 50 == 0:
-                self.trust.observe(self._ally_agent, {
-                    "type": "agreement_honored",
-                    "outcome": "positive"
-                })
-                self.trust.observe(self._enemy_agent, {
-                    "type": "predictable_behavior",
-                    "outcome": "neutral"
-                })
-        
-        elif phase.name == "Betrayal":
-            # Negative interactions
-            if self._game_step % 50 == 0:
-                self.trust.observe(self._ally_agent, {
-                    "type": "agreement_broken",
-                    "outcome": "negative"
-                })
-                self.trust.observe(self._enemy_agent, {
-                    "type": "unprovoked_attack",
-                    "outcome": "negative"
-                })
-        
-        elif phase.name == "Recovery":
-            # Mixed interactions to test recovery
-            if self._game_step % 50 == 0:
-                self.trust.observe(self._ally_agent, {
-                    "type": "accurate_prediction",
-                    "outcome": "positive"
-                })
-                self.trust.observe(self._enemy_agent, {
-                    "type": "deception_detected",
-                    "outcome": "negative"
-                })
-    
-    def _process_communication(self):
-        """Process communication decisions based on trust."""
-        # Test information sharing with different trust levels
-        if self._game_step % 100 == 0:
-            # Economy info sharing
-            should_share_economy = self.communication.should_send(
-                self._ally_agent,
-                InfoCategory.ECONOMY,
-                info_value=0.7
-            )
-            
-            # Army info sharing
-            should_share_army = self.communication.should_send(
-                self._enemy_agent,
-                InfoCategory.ARMY,
-                info_value=0.8
-            )
-            
-            self._communication_history.append({
-                "step": self._step,
-                "phase": PHASES[self._current_phase].name,
-                "ally_trust": self.trust.get_trust(self._ally_agent),
-                "enemy_trust": self.trust.get_trust(self._enemy_agent),
-                "share_economy_with_ally": should_share_economy,
-                "share_army_with_enemy": should_share_army,
-            })
-    
-    def _record_trust_state(self):
-        """Record current trust state."""
-        ally_trust = self.trust.get_trust(self._ally_agent)
-        enemy_trust = self.trust.get_trust(self._enemy_agent)
-        
-        self._trust_history.append({
-            "step": self._step,
-            "game_step": self._game_step,
-            "phase": PHASES[self._current_phase].name,
-            "ally_trust": ally_trust,
-            "enemy_trust": enemy_trust,
-            "ally_level": self.trust.get_level(self._ally_agent).name,
-            "enemy_level": self.trust.get_level(self._enemy_agent).name,
-        })
-    
-    def _extract_action(self, cognitive_state: CognitiveState) -> Optional[Dict[str, Any]]:
-        """Extract SC2 action from cognitive state."""
-        if cognitive_state.action and cognitive_state.action.vector:
-            action_vec = np.array(cognitive_state.action.vector)
-            
-            action_types = [
-                ActionType.EXPAND,
-                ActionType.BUILD_ARMY,
-                ActionType.DEFEND,
-                ActionType.ATTACK,
-                ActionType.SCOUT,
-                ActionType.HOLD,
-            ]
-            
-            if len(action_vec) >= len(action_types):
-                action_idx = np.argmax(action_vec[:len(action_types)])
-                action_type = action_types[action_idx]
-                
-                return {
-                    "type": action_type.value,
-                    "confidence": cognitive_state.action.confidence,
-                }
-        
-        # Default action based on phase
-        phase = PHASES[self._current_phase]
-        if phase.name == "Cooperative":
-            return {"type": "build_army"} if self.minerals >= 150 else {"type": "hold"}
-        elif phase.name == "Betrayal":
-            return {"type": "defend"} if len(self.units) > 5 else {"type": "build_army"}
-        else:  # Recovery
-            return {"type": "hold"}
-    
-    async def _execute_action(self, action: Dict[str, Any]):
-        """Execute action in SC2."""
-        action_type = action.get("type", "hold")
-        
-        if action_type == "build_army":
-            for unit in self.units:
-                if unit.is_structure and unit.type_id in {UnitTypeId.BARRACKS, UnitTypeId.FACTORY}:
-                    if unit.is_idle and self.can_afford(UnitTypeId.MARINE):
-                        await unit.train(UnitTypeId.MARINE)
-        
-        elif action_type == "hold":
-            army = self.units.of_type([UnitTypeId.MARINE, UnitTypeId.MARAUDER])
-            if army:
-                army.hold_position()
-        
-        elif action_type == "defend":
-            army = self.units.of_type([UnitTypeId.MARINE, UnitTypeId.MARAUDER])
-            if army and self.townhalls:
-                army.move(self.townhalls.first.position)
-    
-    def _complete_game(self):
-        """Complete current game and record metrics."""
-        phase = PHASES[self._current_phase]
-        
-        # Record phase metrics
         phase_data = {
             "phase": phase.name,
-            "steps": self._game_step,
+            "steps": steps_in_phase,
             "final_ally_trust": self.trust.get_trust(self._ally_agent),
             "final_enemy_trust": self.trust.get_trust(self._enemy_agent),
             "final_ally_level": self.trust.get_level(self._ally_agent).name,
             "final_enemy_level": self.trust.get_level(self._enemy_agent).name,
-            "communication_decisions": len(self._communication_history),
         }
         self._phase_metrics.append(phase_data)
         
-        print(f"\n--- Game {self._current_phase + 1} Complete ---")
-        print(f"  Ally Trust: {phase_data['final_ally_trust']:.3f} ({phase_data['final_ally_level']})")
-        print(f"  Enemy Trust: {phase_data['final_enemy_trust']:.3f} ({phase_data['final_enemy_level']})")
-        print(f"  Communication Decisions: {phase_data['communication_decisions']}")
+        print(f"\n  Phase Complete: {phase.name}")
+        print(f"    Ally Trust: {phase_data['final_ally_trust']:.3f} ({phase_data['final_ally_level']})")
+        print(f"    Enemy Trust: {phase_data['final_enemy_trust']:.3f} ({phase_data['final_enemy_level']})")
+    
+    def _simulate_trust_interactions(self):
+        """Simulate trust interactions based on current phase."""
+        phase = PHASES[self._current_phase]
         
-        # Start next phase
-        self._start_phase(self._current_phase + 1)
+        for event in phase.trust_events:
+            target = self._ally_agent if event["target"] == "ally" else self._enemy_agent
+            self.trust.observe(target, {"type": event["type"]})
+    
+    def _process_communication(self):
+        """Process communication decisions based on trust."""
+        should_share_economy = self.communication.should_send(
+            self._ally_agent,
+            InfoCategory.ECONOMY,
+            info_value=0.7
+        )
+        
+        should_share_army = self.communication.should_send(
+            self._enemy_agent,
+            InfoCategory.ARMY,
+            info_value=0.8
+        )
+        
+        self._communication_history.append({
+            "step": self._step,
+            "phase": PHASES[self._current_phase].name,
+            "ally_trust": self.trust.get_trust(self._ally_agent),
+            "enemy_trust": self.trust.get_trust(self._enemy_agent),
+            "share_economy_with_ally": should_share_economy,
+            "share_army_with_enemy": should_share_army,
+        })
+    
+    def _record_trust_state(self):
+        """Record current trust state."""
+        self._trust_history.append({
+            "step": self._step,
+            "phase": PHASES[self._current_phase].name,
+            "ally_trust": self.trust.get_trust(self._ally_agent),
+            "enemy_trust": self.trust.get_trust(self._enemy_agent),
+            "ally_level": self.trust.get_level(self._ally_agent).name,
+            "enemy_level": self.trust.get_level(self._enemy_agent).name,
+        })
+    
+    async def _execute_basic_action(self):
+        """Execute basic game action."""
+        if self.minerals >= 150:
+            for unit in self.units:
+                if unit.is_structure and unit.type_id in {UnitTypeId.BARRACKS, UnitTypeId.FACTORY}:
+                    if unit.is_idle and self.can_afford(UnitTypeId.MARINE):
+                        await unit.train(UnitTypeId.MARINE)
+                        break
     
     def _report_status(self):
         """Print status report."""
-        topo = self.kernel.topology.compute_metrics()
-        goals = self.kernel.executive.get_goals()
-        active_goals = [g for g in goals if g.status in (GoalStatus.ACTIVE, GoalStatus.PAUSED)]
-        
         ally_trust = self.trust.get_trust(self._ally_agent)
         enemy_trust = self.trust.get_trust(self._enemy_agent)
         
-        print(f"\n--- Step {self._step} (Game Step {self._game_step}) ---")
-        print(f"  Phase: {PHASES[self._current_phase].name}")
+        print(f"\n--- Step {self._step} ({PHASES[self._current_phase].name}) ---")
         print(f"  Kernel: {self.kernel._tick} ticks, {self.kernel._compute_coherence():.3f} coherence")
         print(f"  Trust: Ally={ally_trust:.3f}, Enemy={enemy_trust:.3f}")
         print(f"  Game: Minerals={self.minerals}, Units={len(self.units)}")
     
-    def print_final_report(self):
+    def _print_final_report(self):
         """Print final experiment report."""
         print(f"\n{'='*60}")
         print(f"EXP-SC2-003: Trust Dynamics Final Report")
@@ -392,7 +308,7 @@ class TrustDynamicsBot(BotAI):
         
         print(f"\nPhase Results:")
         for i, phase_data in enumerate(self._phase_metrics):
-            print(f"\n  Game {i+1}: {phase_data['phase']}")
+            print(f"\n  Phase {i+1}: {phase_data['phase']}")
             print(f"    Steps: {phase_data['steps']}")
             print(f"    Final Ally Trust: {phase_data['final_ally_trust']:.3f} ({phase_data['final_ally_level']})")
             print(f"    Final Enemy Trust: {phase_data['final_enemy_trust']:.3f} ({phase_data['final_enemy_level']})")
@@ -425,41 +341,29 @@ def run_experiment():
     """Run EXP-SC2-003."""
     config = ExperimentConfig(
         map_name="Simple64",
-        steps_per_game=500,
-        num_games=3,
+        max_steps=1500,
         difficulty=Difficulty.Easy,
         realtime=False,
     )
     
     bot = TrustDynamicsBot(config)
     
-    # Create map settings
     map_path = SC2Path(r'C:\Program Files (x86)\StarCraft II\Maps\Melee\Simple64.SC2Map')
     map_settings = Map(map_path)
     
-    # Run all games in sequence
-    results = []
-    for game_idx in range(config.num_games):
-        print(f"\nStarting Game {game_idx + 1}/{config.num_games}")
-        
-        # Reset bot for new game
-        bot._game_step = 0
-        bot._current_phase = game_idx
-        
-        result = run_game(
-            map_settings=map_settings,
-            players=[
-                Bot(Race.Terran, bot),
-                Computer(Race.Random, config.difficulty),
-            ],
-            realtime=config.realtime,
-        )
-        results.append(result)
+    result = run_game(
+        map_settings=map_settings,
+        players=[
+            Bot(Race.Terran, bot),
+            Computer(Race.Random, config.difficulty),
+        ],
+        realtime=config.realtime,
+    )
     
-    bot.print_final_report()
-    return results
+    bot._print_final_report()
+    return result
 
 
 if __name__ == "__main__":
-    results = run_experiment()
-    print(f"\nAll Results: {results}")
+    result = run_experiment()
+    print(f"\nFinal Result: {result}")
