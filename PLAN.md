@@ -1234,3 +1234,105 @@ The first success criterion is:
 | SC2.10 | EXP-SC2-002: Truce Mode Test | ✓ COMPLETE |
 | SC2.11 | EXP-SC2-003: Trust Dynamics Test | ✓ COMPLETE |
 | SC2.12 | EXP-SC2-004: Companion Mode Test | ✓ COMPLETE |
+
+### Phase S16: Domain-Specific Epistemic Trust
+
+**Goal**: Enable "I trust Agent B's model of domain X" rather than just "I trust Agent B"
+
+**Architecture**:
+```
+                Swarm Development Record
+                         |
+          validated patterns / compressed discoveries
+                         |
+        --------------------------------
+        |              |               |
+ Agent Record     Agent Record    Agent Record
+        |              |               |
+ observations   predictions     adaptations
+```
+
+**Key Insight**: A swarm without trust is just a message bus. A swarm with epistemic trust becomes an adaptive knowledge network.
+
+**Trust Vector Dimensions**:
+- Cooperation: Will they act in my interest?
+- Predictability: Can I model their behavior?
+- Competence: Can they accomplish goals?
+- Honesty: Will they share accurate information?
+- Information Reliability: Are their observations trustworthy?
+
+**Domain-Specific Trust**:
+- Instead of "Agent A trusts Agent B", we get "Agent A trusts Agent B's model of domain X"
+- This enables selective knowledge exchange based on demonstrated competence
+- Trust-informed information filtering
+- Cultural prior formation from validated discoveries
+
+**Feedback Path**:
+```
+Individual experience
+        ↓
+Local hypothesis formation
+        ↓
+Validation
+        ↓
+Compressed discovery
+        ↓
+Swarm knowledge
+        ↓
+Cultural prior
+        ↓
+Future agent interpretation
+```
+
+**Components**:
+- DomainTrust: Trust in entity's competence within a domain
+- TrustVector: Multi-dimensional trust with domain-specific tracking
+- EpistemicTrustSystem: Domain expert discovery, trust-weighted knowledge integration
+
+**Status**: ✓ COMPLETE
+
+### Phase S17: Swarm Development Record (Structured Collective Memory)
+
+**Goal**: Create a structured collective record that knows what we don't know
+
+**Architecture**:
+```
+Swarm Development Record
+
+├── Foundational discoveries
+├── Domain knowledge
+├── Failed assumptions
+├── Current uncertainties
+├── Cultural norms
+├── Adaptation history
+└── Open questions
+```
+
+**Key Insight**: A mature swarm should know not only "What do we know?" but also "What do we not know that matters?"
+
+**Status**: PENDING
+
+### Phase S18: Discovery Exchange Protocol
+
+**Goal**: Enable agents to exchange compressed discoveries as swarm currency
+
+**Exchange Layer**:
+```
+Raw Observation
+        ↓
+Feature
+        ↓
+Hypothesis
+        ↓
+Prediction
+        ↓
+Outcome
+        ↓
+Validated Rule
+        ↓
+Compressed Discovery
+```
+
+**Status**: PENDING
+
+**Status**: PENDING
