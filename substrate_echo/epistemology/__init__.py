@@ -138,6 +138,17 @@ from .research import (
     ResearchAgenda,
 )
 
+from .observatory import (
+    EpistemicObservatory,
+    CognitiveTelemetry,
+    EventTimeline,
+    CognitiveEvent,
+    CognitiveSnapshot,
+    ModuleTelemetry,
+    EventType,
+    ModuleType,
+)
+
 
 __all__ = [
     # Observation
@@ -244,4 +255,14 @@ __all__ = [
     "ProposalStatus",
     "ExecutionPlan",
     "ResearchAgenda",
+    
+    # Observatory
+    "EpistemicObservatory",
+    "CognitiveTelemetry",
+    "EventTimeline",
+    "CognitiveEvent",
+    "CognitiveSnapshot",
+    "ModuleTelemetry",
+    "EventType",
+    "ModuleType",
 ]
