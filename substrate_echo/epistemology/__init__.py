@@ -93,6 +93,13 @@ from .swarm import (
     OpenQuestionType,
 )
 
+from .exchange import (
+    DiscoveryExchangeProtocol,
+    ExchangeMessage,
+    ExchangeProtocol,
+    ExchangeRate,
+)
+
 
 __all__ = [
     # Observation
@@ -159,4 +166,10 @@ __all__ = [
     "DiscoveryType",
     "OpenQuestion",
     "OpenQuestionType",
+    
+    # Exchange
+    "DiscoveryExchangeProtocol",
+    "ExchangeMessage",
+    "ExchangeProtocol",
+    "ExchangeRate",
 ]
