@@ -110,6 +110,13 @@ from .lineage import (
     ConflictResolution,
 )
 
+from .cultural_prior import (
+    CulturalPriorEngine,
+    CulturalPrior,
+    PriorType,
+    PriorApplication,
+)
+
 
 __all__ = [
     # Observation
@@ -191,4 +198,10 @@ __all__ = [
     "ConflictResolver",
     "ConflictPair",
     "ConflictResolution",
+    
+    # Cultural Prior
+    "CulturalPriorEngine",
+    "CulturalPrior",
+    "PriorType",
+    "PriorApplication",
 ]
