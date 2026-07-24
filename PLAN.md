@@ -1435,7 +1435,88 @@ Cultural Update           ← Feed back into priors (existing S20)
 
 ---
 
-## Phase S22: Meta-Learning (Learning About Learning)
+## Phase S22: Epistemic Observatory (Cognitive Instrumentation)
+
+**Goal**: Live observability into the swarm's reasoning processes.
+
+### Problem
+
+The architecture has reached the observability bottleneck. We can build cognitive subsystems, but we can't understand them while they're running. We need to see cognition alongside behavior.
+
+### Architecture
+
+```
+Epistemic Observatory
+├── Live HUD (real-time cognitive state)
+├── Event Timeline (timestamped cognitive events)
+├── Knowledge Timeline (discoveries propagating)
+├── Trust Timeline (confidence changes)
+├── Curiosity Timeline (research goals, experiments)
+├── Meta-Cognitive Timeline (strategy evaluation)
+└── Counterfactual Replay (change one variable, re-run)
+```
+
+### Implementation
+
+**Phase 1: Cognitive Telemetry**
+
+Every cognitive subsystem exposes telemetry:
+- HypothesisGenerator: generated, confirmed, rejected, avg confidence
+- PredictionEngine: predicted, accurate, calibration error
+- CulturalPriorEngine: applied, helped, hurt, help rate
+- CuriosityEngine: goals, experiments, discoveries, info gain
+- TrustSystem: updates, domain changes, confidence shifts
+
+**Phase 2: Event Recording**
+
+All cognitive events recorded with timestamps:
+```python
+CognitiveEvent:
+    tick: int
+    module: str
+    event_type: str
+    data: Dict[str, Any]
+    timestamp: float
+```
+
+**Phase 3: Live HUD**
+
+Side panel showing current cognitive state:
+- Current goal
+- Active hypotheses with confidence
+- Predictions with confidence
+- Cultural priors applied
+- Trust levels
+- Rule discoveries
+- Curiosity status
+
+**Phase 4: Time Travel**
+
+Scrub through timeline to inspect reasoning chains:
+- Why did this hypothesis win?
+- Why wasn't that cultural prior used?
+- What rule was learned here?
+
+**Phase 5: Counterfactual Replay**
+
+Pause at any tick, change one variable, re-run:
+- Disable cultural prior
+- Change trust level
+- Remove discovery
+- Compare timelines
+
+### SC2 Role
+
+SC2 becomes the first instrument calibration environment:
+- Live game window + live cognition HUD
+- Side-by-side agent comparison (control vs epistemic)
+- Visual validation of cultural priors, curiosity, trust
+
+### Status**: PENDING
+
+---
+
+## Phase S23: Meta-Cognition (Learning About Learning)
 
 **Goal**: The swarm optimizes its own reasoning strategies, not just its knowledge.
 
@@ -1443,28 +1524,27 @@ Cultural Update           ← Feed back into priors (existing S20)
 
 | Component | Purpose | Status |
 |-----------|---------|--------|
-| `epistemology/meta.py` | MetaLearningEngine, StrategyEvaluator, ReasoningAudit | Pending |
+| `epistemology/meta.py` | MetaCognitiveEngine, CognitiveProcessEvaluator, ReasoningGenome | Pending |
 | `epistemology/scheduler.py` | EpistemicScheduler, BudgetAllocation, ResearchPrioritizer | Pending |
 
 ### Architecture
 
 ```
-Reasoning Strategies
+Cognitive Process Evaluator
       |
-Strategy Evaluation    ← Which strategies produce accurate models?
+Strategy Evaluation    ← Which generators produce accurate models?
       |
 Performance Audit      ← Which councils are overconfident?
+      |
+Reasoning Genome       ← Propagate effective configurations
       |
 Budget Allocation      ← How much resource for each research goal?
       |
 Adaptive Selection     ← When to trust priors vs fresh observations?
 ```
 
-### Key Questions
+### Key Principle
 
-- Which hypothesis-generation heuristics consistently produce accurate models?
-- Which experiment designs maximize information gain per unit cost?
-- Which councils tend to be overconfident or underconfident in different domains?
-- When should the swarm trust cultural priors versus favor fresh observations?
+> Do not optimize strategies. Optimize the generators of strategies.
 
 ### Status**: PENDING
