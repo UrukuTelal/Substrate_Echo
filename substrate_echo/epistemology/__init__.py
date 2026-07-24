@@ -100,6 +100,16 @@ from .exchange import (
     ExchangeRate,
 )
 
+from .lineage import (
+    DiscoveryLineageSystem,
+    DiscoveryLineage,
+    LineageNode,
+    LineageNodeType,
+    ConflictResolver,
+    ConflictPair,
+    ConflictResolution,
+)
+
 
 __all__ = [
     # Observation
@@ -172,4 +182,13 @@ __all__ = [
     "ExchangeMessage",
     "ExchangeProtocol",
     "ExchangeRate",
+    
+    # Lineage
+    "DiscoveryLineageSystem",
+    "DiscoveryLineage",
+    "LineageNode",
+    "LineageNodeType",
+    "ConflictResolver",
+    "ConflictPair",
+    "ConflictResolution",
 ]
