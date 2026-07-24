@@ -1435,84 +1435,50 @@ Cultural Update           ← Feed back into priors (existing S20)
 
 ---
 
-## Phase S22: Epistemic Observatory (Cognitive Instrumentation)
+## Development Philosophy Shift
 
-**Goal**: Live observability into the swarm's reasoning processes.
+**Before S22**: 80% architecture, 20% experiments
+**After S22**: 30% architecture, 70% experiments
 
-### Problem
+The stack is now substantial:
+- Identity, Embodiments, Kernel, Memory
+- Epistemology, Trust, Swarm, Discovery Exchange
+- Lineage, Cultural Priors, Curiosity, Research
+- Observatory (cognitive instrumentation)
 
-The architecture has reached the observability bottleneck. We can build cognitive subsystems, but we can't understand them while they're running. We need to see cognition alongside behavior.
+Experiments will now reveal the next missing abstraction more reliably than brainstorming.
 
-### Architecture
+### Priority: Observatory as Research Instrument
 
-```
-Epistemic Observatory
-├── Live HUD (real-time cognitive state)
-├── Event Timeline (timestamped cognitive events)
-├── Knowledge Timeline (discoveries propagating)
-├── Trust Timeline (confidence changes)
-├── Curiosity Timeline (research goals, experiments)
-├── Meta-Cognitive Timeline (strategy evaluation)
-└── Counterfactual Replay (change one variable, re-run)
-```
+Before S23, make the observatory a first-class research tool:
 
-### Implementation
+**1. Causal Replay** (highest priority)
+- Make event chains executable
+- Expand any decision into reasoning tree
+- Answer: "Why did hypothesis B beat A?"
 
-**Phase 1: Cognitive Telemetry**
+**2. Counterfactual Engine**
+- Remove one observation, re-run, compare
+- Disable cultural prior, re-run, compare
+- Causal analysis, not just visualization
 
-Every cognitive subsystem exposes telemetry:
-- HypothesisGenerator: generated, confirmed, rejected, avg confidence
-- PredictionEngine: predicted, accurate, calibration error
-- CulturalPriorEngine: applied, helped, hurt, help rate
-- CuriosityEngine: goals, experiments, discoveries, info gain
-- TrustSystem: updates, domain changes, confidence shifts
+**3. Knowledge Provenance Graph**
+- How ideas evolved over time
+- Intellectual family tree
+- "What observations eventually led to this strategy?"
 
-**Phase 2: Event Recording**
+### Then: Long-Lived Society Experiment
 
-All cognitive events recorded with timestamps:
-```python
-CognitiveEvent:
-    tick: int
-    module: str
-    event_type: str
-    data: Dict[str, Any]
-    timestamp: float
-```
+25-100 agents over tens of thousands of ticks.
 
-**Phase 3: Live HUD**
-
-Side panel showing current cognitive state:
-- Current goal
-- Active hypotheses with confidence
-- Predictions with confidence
-- Cultural priors applied
-- Trust levels
-- Rule discoveries
-- Curiosity status
-
-**Phase 4: Time Travel**
-
-Scrub through timeline to inspect reasoning chains:
-- Why did this hypothesis win?
-- Why wasn't that cultural prior used?
-- What rule was learned here?
-
-**Phase 5: Counterfactual Replay**
-
-Pause at any tick, change one variable, re-run:
-- Disable cultural prior
-- Change trust level
-- Remove discovery
-- Compare timelines
-
-### SC2 Role
-
-SC2 becomes the first instrument calibration environment:
-- Live game window + live cognition HUD
-- Side-by-side agent comparison (control vs epistemic)
-- Visual validation of cultural priors, curiosity, trust
-
-### Status**: PENDING
+Questions:
+- Do specialists emerge naturally?
+- Do experts become trusted in particular domains?
+- Does knowledge become centralized or distributed?
+- Does the swarm develop stable traditions?
+- Do bad ideas spread and later get corrected?
+- Can scientific "paradigm shifts" occur?
+- Does the community avoid rediscovering the same rules?
 
 ---
 
