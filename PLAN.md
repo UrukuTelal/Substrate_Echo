@@ -1333,6 +1333,56 @@ Validated Rule
 Compressed Discovery
 ```
 
-**Status**: PENDING
+**Key Insight**: Raw data is expensive, opinions are cheap, validated abstractions are valuable.
 
-**Status**: PENDING
+**Components**:
+- DiscoveryExchangeProtocol: Trust-gated discovery sharing
+- ExchangeMessage: Protocol types (DIRECT, BROADCAST, REQUEST, RESPONSE)
+- ExchangeRate: Trust-weighted exchange prioritization
+
+**Status**: ✓ COMPLETE
+
+### Phase S19: Discovery Lineage and Conflict Resolution
+
+**Goal**: Track intellectual genealogy and resolve conflicting discoveries
+
+**Discovery Lineage**:
+```
+Not:
+    "The swarm knows this."
+But:
+    "The swarm knows this because these observations produced
+     this chain of validated updates."
+```
+
+**Conflict Resolution**:
+When two high-trust discoveries conflict:
+```
+Agent A:
+    "Resource pressure causes aggression."
+    Confidence: 0.89
+
+Agent B:
+    "Resource pressure causes cooperation."
+    Confidence: 0.84
+
+Resolution:
+    "Discovery A applies under conditions X.
+     Discovery B applies under conditions Y."
+```
+
+**Components**:
+- DiscoveryLineageSystem: Intellectual genealogy tracking
+- DiscoveryLineage: Lineage tree, validation chain, versioning
+- ConflictResolver: Detecting and resolving conflicting discoveries
+- Resolution types: DOMINANT, CONTEXTUAL, MERGED, SUPERSEDED, PARADOX
+
+**Status**: ✓ COMPLETE
+
+### EXP-SWARM-001: Knowledge Migration
+
+**Question**: Can knowledge discovered by one agent improve another agent that never experienced the original event?
+
+**Finding**: Infrastructure is in place but discoveries need to be integrated into prediction pipeline to affect behavior. Currently discoveries are passive knowledge that don't actively influence predictions. This is a key architectural insight for next phase.
+
+**Status**: ✓ COMPLETE
