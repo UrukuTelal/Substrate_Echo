@@ -68,6 +68,31 @@ from .perturbation import (
     CausalInference,
 )
 
+from .council import (
+    ModelCouncil,
+    RealityCouncil,
+    MemoryCouncil,
+    CalibrationCouncil,
+    EpistemologyCouncil,
+    CouncilRole,
+    CouncilVerdict,
+)
+
+from .trust import (
+    EpistemicTrustSystem,
+    TrustVector,
+    TrustDimension,
+)
+
+from .swarm import (
+    SwarmDevelopmentRecord,
+    AgentEpistemicState,
+    CompressedDiscovery,
+    DiscoveryType,
+    OpenQuestion,
+    OpenQuestionType,
+)
+
 
 __all__ = [
     # Observation
@@ -112,4 +137,26 @@ __all__ = [
     "BaselineState",
     "SystemResponse",
     "CausalInference",
+    
+    # Council
+    "ModelCouncil",
+    "RealityCouncil",
+    "MemoryCouncil",
+    "CalibrationCouncil",
+    "EpistemologyCouncil",
+    "CouncilRole",
+    "CouncilVerdict",
+    
+    # Trust
+    "EpistemicTrustSystem",
+    "TrustVector",
+    "TrustDimension",
+    
+    # Swarm
+    "SwarmDevelopmentRecord",
+    "AgentEpistemicState",
+    "CompressedDiscovery",
+    "DiscoveryType",
+    "OpenQuestion",
+    "OpenQuestionType",
 ]
