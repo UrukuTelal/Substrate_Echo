@@ -1432,3 +1432,39 @@ Cultural Update           ← Feed back into priors (existing S20)
 ```
 
 ### Status**: PENDING
+
+---
+
+## Phase S22: Meta-Learning (Learning About Learning)
+
+**Goal**: The swarm optimizes its own reasoning strategies, not just its knowledge.
+
+### Components
+
+| Component | Purpose | Status |
+|-----------|---------|--------|
+| `epistemology/meta.py` | MetaLearningEngine, StrategyEvaluator, ReasoningAudit | Pending |
+| `epistemology/scheduler.py` | EpistemicScheduler, BudgetAllocation, ResearchPrioritizer | Pending |
+
+### Architecture
+
+```
+Reasoning Strategies
+      |
+Strategy Evaluation    ← Which strategies produce accurate models?
+      |
+Performance Audit      ← Which councils are overconfident?
+      |
+Budget Allocation      ← How much resource for each research goal?
+      |
+Adaptive Selection     ← When to trust priors vs fresh observations?
+```
+
+### Key Questions
+
+- Which hypothesis-generation heuristics consistently produce accurate models?
+- Which experiment designs maximize information gain per unit cost?
+- Which councils tend to be overconfident or underconfident in different domains?
+- When should the swarm trust cultural priors versus favor fresh observations?
+
+### Status**: PENDING
