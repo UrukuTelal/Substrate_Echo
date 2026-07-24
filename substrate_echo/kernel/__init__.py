@@ -42,6 +42,17 @@ from ..dynamics.abstraction import AbstractionEngine
 from .executive import ExecutiveFunction, GoalState, GoalStatus, GoalTier, ExecutiveState
 from .resources import ResourceManager, ResourceRequest, ResourceAllocation, ResourceState
 from .council import Council, AuditReport, CouncilState
+from ..epistemology import (
+    FeatureExtractor,
+    ObservationMemory,
+    HypothesisSpace,
+    PredictionEngine,
+    PredictionMemory,
+    RuleDiscoveryEngine,
+    DevelopmentRecord,
+    EventType,
+    EpistemologyCouncil,
+)
 
 
 # ── Cognitive Plane: State Types ──────────────────────────────────
@@ -195,6 +206,16 @@ class SubstrateKernel:
         self.executive = ExecutiveFunction()
         self.resources = ResourceManager()
         self.council = Council()
+        
+        # Epistemology layer
+        self.feature_extractor = FeatureExtractor()
+        self.observation_memory = ObservationMemory()
+        self.hypothesis_space = HypothesisSpace()
+        self.prediction_engine = PredictionEngine()
+        self.prediction_memory = PredictionMemory()
+        self.rule_engine = RuleDiscoveryEngine()
+        self.development_record = DevelopmentRecord()
+        self.epistemology_council = EpistemologyCouncil()
 
         # Cognitive state
         self._tick = 0
@@ -205,6 +226,12 @@ class SubstrateKernel:
         self._rewards: List[Reward] = []
         self._embodiments: Dict[str, EmbodimentState] = {}
         self._cognitive_energy = self.config.total_energy
+        
+        # Epistemology state
+        self._last_features = None
+        self._hypothesis_interval = 20
+        self._prediction_interval = 10
+        self._rule_check_interval = 50
 
     # ── Cognitive Plane ──────────────────────────────────────────
 
@@ -217,6 +244,26 @@ class SubstrateKernel:
             self._embodiments[obs.embodiment_id] = EmbodimentState(
                 embodiment_id=obs.embodiment_id)
         self._embodiments[obs.embodiment_id].is_active = True
+        
+        # Epistemology: Feature extraction
+        from ..epistemology.observation import RawObservation
+        raw = RawObservation(
+            data={"vector_" + str(i): v for i, v in enumerate(state)},
+            modality=obs.modality,
+            source=obs.embodiment_id,
+            timestamp=obs.timestamp,
+            metadata=obs.metadata,
+        )
+        features = self.feature_extractor.extract(raw)
+        self.observation_memory.record(features)
+        self._last_features = features
+        
+        # Record observation in development record
+        self.development_record.record_observation(
+            self._tick,
+            f"Observation from {obs.embodiment_id}",
+            details=features.to_dict(),
+        )
 
         # Learn dynamics
         if self._prev_state is not None:
@@ -243,6 +290,29 @@ class SubstrateKernel:
         # Topology
         if self._tick % self.config.topology_interval == 0 and self._tick > 0:
             self.topology.record_snapshot(self._tick)
+        
+        # Epistemology: Generate hypotheses periodically
+        if self._tick % self._hypothesis_interval == 0 and self._tick > 20:
+            self._generate_hypotheses()
+        
+        # Epistemology: Generate predictions periodically
+        if self._tick % self._prediction_interval == 0 and self._tick > 10:
+            self._generate_predictions()
+        
+        # Epistemology: Verify predictions against current state
+        self._verify_predictions(state)
+        
+        # Epistemology: Discover rules periodically
+        if self._tick % self._rule_check_interval == 0 and self._tick > 50:
+            self.rule_engine.discover_rules()
+        
+        # Epistemology: Council audit periodically
+        if self._tick % 100 == 0 and self._tick > 100:
+            self.epistemology_council.audit(
+                self.hypothesis_space,
+                self.prediction_memory,
+                self.rule_engine,
+            )
 
         # Apply pending rewards
         self._apply_rewards()
@@ -303,6 +373,95 @@ class SubstrateKernel:
 
     def set_goals(self, goals: List[Goal]):
         self._goals = goals
+    
+    # ── Epistemology Methods ─────────────────────────────────────
+    
+    def _generate_hypotheses(self):
+        """Generate hypotheses from current observations."""
+        if not self._last_features:
+            return
+        
+        # Check for trends in recent observations
+        recent = self.observation_memory.get_recent(20)
+        if len(recent) < 10:
+            return
+        
+        # Generate hypothesis based on observation patterns
+        for feature_name in list(self._last_features.features.keys())[:3]:
+            trend = self.observation_memory.detect_trend(feature_name)
+            if trend and trend != "stable":
+                h = self.hypothesis_space.generate(
+                    description=f"Feature {feature_name} is {trend}",
+                    confidence=0.5,
+                    source="kernel_observation",
+                )
+                self.development_record.record_hypothesis(
+                    self._tick,
+                    f"Generated hypothesis: {feature_name} is {trend}",
+                    h.id,
+                    h.confidence,
+                )
+    
+    def _generate_predictions(self):
+        """Generate predictions from active hypotheses."""
+        active_hypotheses = self.hypothesis_space.get_active()
+        if not active_hypotheses or not self._last_features:
+            return
+        
+        for h in active_hypotheses[:5]:  # Limit predictions
+            predictions = self.prediction_engine.generate_from_hypothesis(
+                h, self._last_features, time_horizon=20
+            )
+            for p in predictions:
+                self.prediction_memory.record(p)
+                self.development_record.record_prediction(
+                    self._tick,
+                    f"Prediction from {h.id}",
+                    p.id,
+                    h.id,
+                )
+    
+    def _verify_predictions(self, current_state: np.ndarray):
+        """Verify pending predictions against current state."""
+        pending = self.prediction_memory.get_pending(self._tick)
+        
+        # Convert state to outcome dictionary
+        actual_outcome = {f"dim_{i}": v for i, v in enumerate(current_state)}
+        
+        for prediction in pending:
+            status = prediction.verify(actual_outcome)
+            
+            # Record outcome in development record
+            success = status.value in ("confirmed", "partial")
+            self.development_record.record_outcome(
+                self._tick,
+                prediction.id,
+                success,
+                actual_outcome,
+                prediction.expected,
+            )
+            
+            # Update hypothesis based on prediction outcome
+            if prediction.source_hypothesis:
+                hypothesis = self.hypothesis_space.get(prediction.source_hypothesis)
+                if hypothesis:
+                    from ..epistemology.hypothesis import Evidence
+                    evidence = Evidence(
+                        description=f"Prediction {prediction.id}: {status.value}",
+                        supports=success,
+                        strength=0.7 if success else 0.8,
+                        source="kernel_verification",
+                    )
+                    hypothesis.add_evidence(evidence)
+    
+    def get_epistemology_state(self) -> Dict[str, Any]:
+        """Get current epistemology state."""
+        return {
+            "hypotheses": len(self.hypothesis_space.get_active()),
+            "predictions": self.prediction_memory.get_accuracy_stats(),
+            "rules": len(self.rule_engine.get_rules()),
+            "development_events": self.development_record.get_summary(),
+        }
 
     # ── Control Plane ────────────────────────────────────────────
 
@@ -310,6 +469,7 @@ class SubstrateKernel:
         """Full serializable state for persistence/checkpointing."""
         topo = self.topology.compute_metrics()
         abs_summary = self.abstraction.summary()
+        epist_state = self.get_epistemology_state()
         return {
             "tick": self._tick,
             "n_attractors": len(self._base_attractors),
@@ -328,6 +488,7 @@ class SubstrateKernel:
             "abstraction_events": abs_summary["n_abstraction_events"],
             "topology_events": len(self.topology.events),
             "resources": self.resources.get_state().budget,
+            "epistemology": epist_state,
         }
 
     def get_topology_history(self) -> List[Dict]:

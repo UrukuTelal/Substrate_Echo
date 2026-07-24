@@ -118,26 +118,61 @@ class CulturalPrior:
     
     def is_applicable(self, observation: Dict[str, Any]) -> bool:
         """Check if this prior applies to the current observation."""
-        # Check applicability conditions
-        for key, value in self.applicability_conditions.items():
-            if key not in observation:
-                return False
-            if isinstance(value, (int, float)):
-                if abs(observation[key] - value) > 0.2:
-                    return False
-            elif observation[key] != value:
-                return False
+        # If always_apply is set, this prior always applies
+        if self.applicability_conditions.get("always_apply", False):
+            return True
         
-        # Check exclusion conditions
-        for key, value in self.exclusion_conditions.items():
+        # If no applicability conditions, always applicable
+        if not self.applicability_conditions:
+            return True
+        
+        # Check applicability conditions - lenient matching
+        applicable_count = 0
+        checked_count = 0
+        total_conditions = len(self.applicability_conditions)
+        
+        for key, value in self.applicability_conditions.items():
+            if key == "always_apply":
+                continue
+            
+            if key in observation:
+                checked_count += 1
+                if isinstance(value, (int, float)):
+                    if abs(observation[key] - value) <= 0.5:  # Lenient threshold
+                        applicable_count += 1
+                elif observation[key] == value:
+                    applicable_count += 1
+            # If key not in observation, skip (don't fail)
+        
+        # Prior is applicable if:
+        # - At least one condition matches, OR
+        # - No conditions could be checked (observation doesn't have the keys)
+        return applicable_count > 0 or checked_count == 0
+    
+    def get_applicability_score(self, observation: Dict[str, Any]) -> float:
+        """Get how applicable this prior is to the observation [0, 1]."""
+        if self.applicability_conditions.get("always_apply", False):
+            return 1.0
+        
+        if not self.applicability_conditions:
+            return 1.0
+        
+        matches = 0
+        total = 0
+        
+        for key, value in self.applicability_conditions.items():
+            if key == "always_apply":
+                continue
+            total += 1
+            
             if key in observation:
                 if isinstance(value, (int, float)):
-                    if abs(observation[key] - value) < 0.1:
-                        return False
+                    if abs(observation[key] - value) <= 0.5:
+                        matches += 1
                 elif observation[key] == value:
-                    return False
+                    matches += 1
         
-        return True
+        return matches / total if total > 0 else 0.5
     
     def record_application(self, helped: bool):
         """Record an application event."""
@@ -298,12 +333,71 @@ class CulturalPriorEngine:
         """Extract applicability conditions from discovery."""
         conditions = {}
         
-        # Extract from pattern
+        # Extract from pattern - include both numeric and string values
         for key, value in discovery.pattern.items():
             if key != "domain":
                 conditions[key] = value
         
+        # If no conditions, make it always applicable
+        if not conditions:
+            conditions["always_apply"] = True
+        
         return conditions
+    
+    def is_applicable(self, observation: Dict[str, Any]) -> bool:
+        """Check if this prior applies to the current observation."""
+        # If always_apply is set, this prior always applies
+        if self.applicability_conditions.get("always_apply", False):
+            return True
+        
+        # If no applicability conditions, always applicable
+        if not self.applicability_conditions:
+            return True
+        
+        # Check applicability conditions - lenient matching
+        applicable_count = 0
+        total_conditions = len(self.applicability_conditions)
+        
+        for key, value in self.applicability_conditions.items():
+            if key == "always_apply":
+                continue
+            
+            if key in observation:
+                if isinstance(value, (int, float)):
+                    if abs(observation[key] - value) <= 0.5:  # Lenient threshold
+                        applicable_count += 1
+                elif observation[key] == value:
+                    applicable_count += 1
+            # If key not in observation, skip (don't fail)
+        
+        # Prior is applicable if at least one condition matches
+        # or if no conditions could be checked
+        return applicable_count > 0 or total_conditions == 0
+    
+    def get_applicability_score(self, observation: Dict[str, Any]) -> float:
+        """Get how applicable this prior is to the observation [0, 1]."""
+        if self.applicability_conditions.get("always_apply", False):
+            return 1.0
+        
+        if not self.applicability_conditions:
+            return 1.0
+        
+        matches = 0
+        total = 0
+        
+        for key, value in self.applicability_conditions.items():
+            if key == "always_apply":
+                continue
+            total += 1
+            
+            if key in observation:
+                if isinstance(value, (int, float)):
+                    if abs(observation[key] - value) <= 0.5:
+                        matches += 1
+                elif observation[key] == value:
+                    matches += 1
+        
+        return matches / total if total > 0 else 0.5
     
     def _enforce_domain_limit(self, domain: str):
         """Keep only the top priors per domain."""
@@ -400,22 +494,30 @@ class CulturalPriorEngine:
         return modified
     
     def _prior_relevant_to_hypothesis(self, prior: CulturalPrior,
-                                      hypothesis: Dict[str, Any]) -> bool:
-        """Check if a prior is relevant to a hypothesis."""
-        # Simple relevance check based on domain and description overlap
+                                       hypothesis: Dict[str, Any]) -> bool:
+        """Check if a prior is relevant to a hypothesis.
+        
+        Uses applicability_conditions (e.g., signal_trend) to determine
+        specific relevance rather than broad domain keyword matching.
+        This prevents all hypotheses from getting equal adjustments
+        (which would cancel out after renormalization).
+        """
         hyp_desc = hypothesis.get("description", "").lower()
-        prior_domain = prior.domain.lower()
         
-        # Check if domain matches or is mentioned
-        if prior_domain in hyp_desc:
-            return True
+        # Check applicability_conditions for specific relevance
+        # Only string conditions provide specific relevance (e.g., "increasing" in description)
+        # Numeric conditions (e.g., phase=0) don't help match hypothesis descriptions
+        for key, value in prior.applicability_conditions.items():
+            if key == "always_apply":
+                continue
+            if isinstance(value, str):
+                # Check if the condition value appears in hypothesis description
+                if value in hyp_desc:
+                    return True
         
-        # Check for keyword overlap
-        prior_keywords = set(prior_domain.split("_"))
-        hyp_words = set(hyp_desc.split())
-        
-        overlap = len(prior_keywords & hyp_words)
-        return overlap > 0
+        # No match from string conditions means prior is not relevant to this hypothesis
+        # This prevents all hypotheses from getting equal adjustments
+        return False
     
     def record_application(self, prior_id: str, hypothesis_correct: bool):
         """Record how a prior application went."""

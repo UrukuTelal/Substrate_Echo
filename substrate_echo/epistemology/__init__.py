@@ -117,6 +117,27 @@ from .cultural_prior import (
     PriorApplication,
 )
 
+from .curiosity import (
+    EpistemicCuriosityEngine,
+    UncertaintyMap,
+    KnowledgeGap,
+    GapType,
+    GapPriority,
+    ImpactAssessor,
+    ImpactAssessment,
+    ResearchGoal,
+)
+
+from .research import (
+    ExperimentPlanner,
+    ExperimentProposal,
+    ExperimentDesign,
+    ExperimentType,
+    ProposalStatus,
+    ExecutionPlan,
+    ResearchAgenda,
+)
+
 
 __all__ = [
     # Observation
@@ -204,4 +225,23 @@ __all__ = [
     "CulturalPrior",
     "PriorType",
     "PriorApplication",
+    
+    # Curiosity
+    "EpistemicCuriosityEngine",
+    "UncertaintyMap",
+    "KnowledgeGap",
+    "GapType",
+    "GapPriority",
+    "ImpactAssessor",
+    "ImpactAssessment",
+    "ResearchGoal",
+    
+    # Research
+    "ExperimentPlanner",
+    "ExperimentProposal",
+    "ExperimentDesign",
+    "ExperimentType",
+    "ProposalStatus",
+    "ExecutionPlan",
+    "ResearchAgenda",
 ]
