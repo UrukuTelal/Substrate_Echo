@@ -104,6 +104,13 @@ substrate_echo/
 │   ├── attractor_dynamics.py   # Attractor formation, decay, merging
 │   ├── pillar_coupling.py      # 16-pillar inter-coupling
 │   └── ...
+├── epistemology/     # Epistemic continuity layer
+│   ├── observation.py          # Feature extraction, ObservationMemory
+│   ├── hypothesis.py           # Hypothesis objects, HypothesisSpace
+│   ├── prediction.py           # PredictionEngine, PredictionMemory
+│   ├── rule_discovery.py       # PatternDetector, RuleDiscoveryEngine
+│   ├── development_record.py   # History of becoming
+│   └── perturbation.py         # Causal discovery through intervention
 ├── external/         # Epistemic firewall for external agents
 ├── social/           # Persona genomes, relationship dynamics
 ├── models/           # Data structures (Experience, MemoryTrace, etc.)

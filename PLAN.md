@@ -779,6 +779,52 @@ Wire the new layers into the existing attractor dynamics.
 - Abstraction hierarchy forms naturally from correlation
 - 19 integration tests passing (test_integration.py)
 
+## Phase S15: Epistemology Layer — COMPLETE ✓
+
+### Objective
+Give the substrate epistemic continuity: the ability to track what was observed,
+what was inferred, what was predicted, and whether reality confirmed or contradicted
+those predictions.
+
+### Components ✓
+
+| Module | Purpose | Status |
+|--------|---------|--------|
+| `epistemology/observation.py` | Feature extraction, ObservationMemory | ✓ |
+| `epistemology/hypothesis.py` | Hypothesis objects, HypothesisSpace | ✓ |
+| `epistemology/prediction.py` | PredictionEngine, PredictionMemory | ✓ |
+| `epistemology/rule_discovery.py` | PatternDetector, RuleDiscoveryEngine | ✓ |
+| `epistemology/development_record.py` | History of becoming (learning journey) | ✓ |
+| `epistemology/perturbation.py` | Causal discovery through intervention | ✓ |
+
+### Architecture
+```
+Raw Observation
+     ↓
+Feature Extraction (objective measurements)
+     ↓
+Hypothesis Generation (competing explanations)
+     ↓
+Prediction (expected outcomes)
+     ↓
+Outcome Verification (reality check)
+     ↓
+Belief Update (confidence adjustment)
+     ↓
+Rule Discovery (learned patterns)
+     ↓
+Development Record (history of becoming)
+```
+
+### Experiment: EXP-EPIST-001 ✓
+
+**Results:**
+- Prediction accuracy: 66.7% → 96.4% over 500 steps
+- 93 confirmed predictions, 2 failed (failures are valuable data)
+- 25 hypotheses generated, 20 active
+- 100 rules discovered and validated
+- 2065 development events recorded
+
 ---
 
 ## Experiment Results
