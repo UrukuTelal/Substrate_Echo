@@ -70,7 +70,7 @@ class LiveBot(BotAI):
         self._start_time = 0.0
         self._prev_observation: Optional[Dict] = None
 
-    async def on_start(self):
+    def on_start(self):
         self._start_time = time.time()
         print(f"\n{'='*60}")
         print(f"  SUBSTRATE ECHO — SC2 LIVE GAME")
@@ -81,6 +81,27 @@ class LiveBot(BotAI):
         print(f"  Steps:   {self.config['max_steps']}")
         print(f"  Realtime: {self.config['realtime']}")
         print(f"{'='*60}\n")
+
+        # Health check — all epistemic components must be initialized
+        components = {
+            "Kernel":      self.kernel,
+            "EntityModel": self.entity_model,
+            "Affordances": self.affordance_tracer,
+            "ActionBridge": self.action_bridge,
+            "Governance":  self.governance_gate,
+            "Recorder":    self.chain,
+            "Encoder":     self.encoder,
+        }
+        all_ok = True
+        print("  Epistemic Kernel Health Check:")
+        for name, obj in components.items():
+            status = "OK" if obj is not None else "MISSING"
+            if obj is None:
+                all_ok = False
+            print(f"    {name:16s} {status}")
+        if not all_ok:
+            print("\n  WARNING: Some components missing — agent will fallback to default policy")
+        print()
 
         # Inject initial goals
         from substrate_echo.kernel import Goal
@@ -94,9 +115,9 @@ class LiveBot(BotAI):
     async def on_step(self, iteration: int):
         self._step += 1
 
-        # ── 1. OBSERVE (two sources for state visibility debugging) ──
-        # Raw GameState (fog-of-war limited) for encoder
-        raw_vec = self.encoder.encode(self.state)
+        # ── 1. OBSERVE ──
+        # Use encode_from_botai() for own-unit counts (fog-of-war independent)
+        raw_vec = self.encoder.encode_from_botai(self)
 
         # BotAI persistent knowledge for metadata (correct counts)
         workers_botai = len(self.units.of_type(UnitTypeId.SCV))
@@ -121,7 +142,7 @@ class LiveBot(BotAI):
         # ── 2. LAYERED TELEMETRY: detect observation mismatch ──
         encoder_workers = self.encoder.economy.workers
         if encoder_workers != workers_botai:
-            self.chain._anomalies.append((
+            self.chain.anomalies.append((
                 self._step,
                 AnomalyType.OBSERVATION_GAP,
                 f"Encoder sees {encoder_workers} workers, BotAI has {workers_botai}"

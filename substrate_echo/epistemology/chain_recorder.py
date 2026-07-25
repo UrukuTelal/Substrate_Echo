@@ -390,6 +390,11 @@ class EpistemicChainRecorder:
                 counts[action] = counts.get(action, 0) + 1
         return counts
 
+    @property
+    def anomalies(self) -> List[Tuple[int, AnomalyType, str]]:
+        """Public alias for internal anomaly list."""
+        return self._anomalies
+
     def get_anomaly_summary(self) -> Dict[str, int]:
         """Get count of each anomaly type."""
         counts = {}
