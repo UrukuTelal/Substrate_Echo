@@ -35,6 +35,9 @@ from substrate_echo.epistemology.trust import EpistemicTrustSystem
 from substrate_echo.epistemology.observatory import EpistemicObservatory
 from substrate_echo.epistemology.chain_recorder import EpistemicChainRecorder, AnomalyType
 from substrate_echo.epistemology.entity_model import EntityModel, EvidenceType, RelationshipType
+from substrate_echo.epistemology.affordance_tracer import AffordanceTracer
+from substrate_echo.epistemology.action_bridge import EpistemicActionBridge
+from substrate_echo.epistemology.governance_gate import GovernanceGate
 
 
 # ── Bot ───────────────────────────────────────────────────────────
