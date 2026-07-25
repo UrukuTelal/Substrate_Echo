@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
+from sc2.ids.unit_typeid import UnitTypeId
 
 
 # ── Observation Categories ───────────────────────────────────────
