@@ -199,6 +199,22 @@ from .instrumentation import (
     EpistemicAgeAnalyzer,
 )
 
+from .chain_recorder import (
+    EpistemicChainRecorder,
+    ChainLink,
+    TransitionType,
+    AnomalyType,
+)
+
+from .entity_model import (
+    EntityModel,
+    Entity,
+    RelationshipType,
+    RelationshipHypothesis,
+    EvidenceType,
+    Evidence,
+)
+
 
 __all__ = [
     # Observation
@@ -364,4 +380,14 @@ __all__ = [
     # Epistemic Age
     "EpistemicAgeProfile",
     "EpistemicAgeAnalyzer",
+    # Chain Recorder
+    "EpistemicChainRecorder",
+    "ChainLink",
+    "TransitionType",
+    "AnomalyType",
+    # Entity Model
+    "EntityModel",
+    "Entity",
+    "RelationshipType",
+    "EvidenceType",
 ]

@@ -591,9 +591,6 @@ class SubstrateKernel:
         """Adjust attractor strengths based on rewards."""
         if not self._rewards:
             return
-        for reward in self._rewards.pop(0):
-            pass  # TODO: apply to specific attractor
-        # Simple global reinforcement
         for reward in self._rewards:
             if reward.target_attractor is not None:
                 aid = reward.target_attractor
