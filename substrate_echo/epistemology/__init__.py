@@ -215,6 +215,27 @@ from .entity_model import (
     Evidence,
 )
 
+from .affordance_tracer import (
+    AffordanceTracer,
+    AffordanceCandidate,
+    SC2ActionType,
+    CostLevel,
+    WorldState,
+)
+
+from .action_bridge import (
+    EpistemicActionBridge,
+    ActionScore,
+)
+
+from .governance_gate import (
+    GovernanceGate,
+    GovernanceDecision,
+    GovernanceRule,
+    GovernanceVerdict,
+    RulePriority,
+)
+
 
 __all__ = [
     # Observation
@@ -390,4 +411,18 @@ __all__ = [
     "Entity",
     "RelationshipType",
     "EvidenceType",
+    # Affordance Tracer
+    "AffordanceTracer",
+    "AffordanceCandidate",
+    "SC2ActionType",
+    "CostLevel",
+    "WorldState",
+    # Action Bridge
+    "EpistemicActionBridge",
+    "ActionScore",
+    # Governance Gate
+    "GovernanceGate",
+    "GovernanceDecision",
+    "GovernanceRule",
+    "GovernanceVerdict",
 ]

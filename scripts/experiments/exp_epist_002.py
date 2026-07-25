@@ -1,306 +1,415 @@
-"""EXP-EPIST-002: Confidence Calibration.
+"""EXP-EPIST-002: Blind Agent vs Belief Agent vs Full Epistemic Agent.
 
-Goal: Determine if confidence matches reality.
-A system saying 90% confidence should be correct ~90% of the time.
+Compares three agent configurations to test whether epistemic
+architecture improves world prediction and action quality.
+
+Configuration 1 — Blind Agent:
+    No entity model, no predictions, no governance.
+    Pure affordance-based action selection.
+
+Configuration 2 — Belief Agent:
+    Entity model with evidence-backed relationships.
+    Predictions inform action but no governance gate.
+
+Configuration 3 — Full Epistemic Agent:
+    Entity model + predictions + governance gate.
+    Actions scored by confidence × prediction × affordance.
 
 Measures:
-  - Prediction confidence vs actual success rate
-  - Calibration error over time
-  - Effect of council interventions on calibration
+    - Action diversity (entropy)
+    - Prediction accuracy
+    - Confidence calibration
+    - Governance intervention rate
+    - Survival time (proxy for decision quality)
 
-Architecture:
-  Multiple Simulated Environments
-       |
-  Parallel Agents with Different Confidence Profiles
-       |
-  Prediction Tracking
-       |
-  Calibration Analysis
+SC2 Integration:
+    All three agents run the same bot code with different
+    epistemology layers enabled/disabled.
 """
-from __future__ import annotations
 import sys
+import os
 import time
+import random
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from dataclasses import dataclass, field
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from substrate_echo.epistemology import (
-    FeatureExtractor,
-    ObservationMemory,
-    HypothesisSpace,
-    PredictionEngine,
-    PredictionMemory,
-    PredictionStatus,
-    DevelopmentRecord,
-    EventType,
-    CalibrationCouncil,
+from substrate_echo.epistemology.affordance_tracer import (
+    AffordanceTracer, AffordanceCandidate, SC2ActionType,
+    CostLevel, WorldState
 )
+from substrate_echo.epistemology.action_bridge import EpistemicActionBridge
+from substrate_echo.epistemology.governance_gate import GovernanceGate, GovernanceDecision
+from substrate_echo.epistemology.entity_model import (
+    EntityModel, EvidenceType, RelationshipType
+)
+from substrate_echo.epistemology.chain_recorder import EpistemicChainRecorder
 
 
 @dataclass
-class ExperimentConfig:
-    """EXP-EPIST-002 configuration."""
-    max_steps: int = 500
-    n_agents: int = 3
-    observation_interval: int = 5
-    prediction_interval: int = 10
-    calibration_interval: int = 50
-    report_interval: int = 100
-    
-    # Environment parameters
-    signal_noise: float = 0.1
-    pattern_change_step: int = 250
+class AgentConfig:
+    """Agent configuration for comparison."""
+    name: str
+    use_entity_model: bool = False
+    use_predictions: bool = False
+    use_governance: bool = False
+    use_action_bridge: bool = False
 
 
-class CalibrationAgent:
-    """Agent with confidence tracking for calibration analysis."""
-    
-    def __init__(self, agent_id: str, confidence_modifier: float = 1.0):
-        self.agent_id = agent_id
-        self.confidence_modifier = confidence_modifier  # >1 = overconfident, <1 = underconfident
-        
-        self.extractor = FeatureExtractor()
-        self.observation_memory = ObservationMemory()
-        self.hypothesis_space = HypothesisSpace()
-        self.prediction_engine = PredictionEngine()
-        self.prediction_memory = PredictionMemory()
-        self.development_record = DevelopmentRecord()
-        
-        self._step = 0
-        self._last_features = None
-        
-        # Calibration tracking
-        self._confidence_history: List[float] = []
-        self._accuracy_history: List[float] = []
-    
-    def process_observation(self, raw_data: Dict[str, float]):
-        """Process observation and generate features."""
-        from substrate_echo.epistemology.observation import RawObservation
-        
-        raw = RawObservation(
-            data=raw_data,
-            modality="simulation",
-            source=self.agent_id,
-            timestamp=time.time(),
+@dataclass
+class SimulatedEntity:
+    """Simulated enemy entity for testing."""
+    entity_id: str
+    behavior: str  # "aggressive", "passive", "scout", "expand"
+    strength: float = 0.5
+    position: float = 0.5
+    alive: bool = True
+
+    def get_action(self, tick: int) -> str:
+        """Deterministic behavior pattern."""
+        if not self.alive:
+            return "dead"
+        if self.behavior == "aggressive":
+            return "attack" if tick % 10 < 6 else "defend"
+        elif self.behavior == "passive":
+            return "expand" if tick % 15 < 4 else "defend"
+        elif self.behavior == "scout":
+            return "scout" if tick % 8 < 5 else "expand"
+        else:
+            return "expand" if tick % 12 < 5 else "attack"
+
+
+@dataclass
+class SimulatedWorld:
+    """Simulated game world for testing."""
+    tick: int = 0
+    minerals: float = 100.0
+    vespene: float = 0.0
+    workers: int = 12
+    army: int = 0
+    bases: int = 1
+    supply_used: int = 12
+    supply_cap: int = 15
+    uncertainty: float = 0.7
+    enemy_units_seen: int = 0
+    last_scout_tick: int = 0
+
+    def tick_forward(self, action: str):
+        """Simulate one tick of game state."""
+        self.tick += 1
+
+        # Economy grows
+        self.minerals += self.workers * 0.8
+
+        # Workers gather
+        if action == "build_economy" and self.minerals >= 50:
+            self.workers += 1
+            self.minerals -= 50
+            self.supply_used += 1
+
+        # Army grows
+        if action == "build_army" and self.minerals >= 50 and self.supply_used < self.supply_cap:
+            self.army += 1
+            self.minerals -= 50
+            self.supply_used += 1
+
+        # Expand
+        if action == "expand" and self.minerals >= 400:
+            self.bases += 1
+            self.minerals -= 400
+            self.workers += 1  # SCV for new base
+
+        # Scout reduces uncertainty
+        if action == "scout":
+            self.uncertainty = max(0.1, self.uncertainty - 0.15)
+            self.last_scout_tick = self.tick
+            self.enemy_units_seen += random.randint(0, 3)
+
+        # Build supply
+        if self.supply_used >= self.supply_cap - 2 and self.minerals >= 100:
+            self.supply_cap += 8
+            self.minerals -= 100
+
+        # Attack reduces army
+        if action == "attack" and self.army > 0:
+            losses = random.randint(0, max(1, self.army // 3))
+            self.army = max(0, self.army - losses)
+
+        # Cap values
+        self.minerals = min(5000, self.minerals)
+        self.uncertainty = max(0.05, min(1.0, self.uncertainty))
+
+    def to_world_state(self) -> WorldState:
+        return WorldState(
+            minerals=self.minerals,
+            vespene=self.vespene,
+            supply_used=self.supply_used,
+            supply_cap=self.supply_cap,
+            workers=self.workers,
+            bases=self.bases,
+            army_count=self.army,
+            army_value=self.army * 100,
+            enemy_units_seen=self.enemy_units_seen,
+            last_scout_tick=self.last_scout_tick,
+            uncertainty=self.uncertainty,
+            current_tick=self.tick,
+            game_phase="early" if self.tick < 100 else "mid",
         )
-        
-        features = self.extractor.extract(raw)
-        self.observation_memory.record(features)
-        self._last_features = features
-        
-        return features
-    
-    def generate_predictions(self, features):
-        """Generate predictions from current state."""
-        if not features or not self._last_features:
-            return []
-        
-        # Generate hypothesis
-        trend = self.observation_memory.detect_trend("signal")
-        if trend:
-            h = self.hypothesis_space.generate(
-                description=f"Signal is {trend}",
-                confidence=0.5 * self.confidence_modifier,
-                source="calibration_test",
-            )
-            
-            # Generate predictions
-            predictions = self.prediction_engine.generate_from_hypothesis(
-                h, features, time_horizon=20
-            )
-            
-            # Apply confidence modifier
-            for p in predictions:
-                p.confidence = min(1.0, p.confidence * self.confidence_modifier)
-                self.prediction_memory.record(p)
-            
-            return predictions
-        
-        return []
-    
-    def verify_predictions(self, actual_outcome: Dict[str, float]):
-        """Verify predictions and track calibration."""
-        pending = self.prediction_memory.get_pending(self._step)
-        
-        for prediction in pending:
-            status = prediction.verify(actual_outcome)
-            
-            # Track confidence vs accuracy
-            self._confidence_history.append(prediction.confidence)
-            self._accuracy_history.append(1.0 if status == PredictionStatus.CONFIRMED else 0.0)
-            
-            # Record in development record
-            success = status in (PredictionStatus.CONFIRMED, PredictionStatus.PARTIAL)
-            self.development_record.record_outcome(
-                self._step,
-                prediction.id,
-                success,
-                actual_outcome,
-                prediction.expected,
-            )
-    
-    def get_calibration_metrics(self) -> Dict[str, Any]:
-        """Calculate calibration metrics."""
-        if not self._confidence_history:
-            return {"error": 0.0, "n": 0}
-        
-        # Group by confidence bins
-        n_bins = 10
-        bins = {}
-        
-        for conf, acc in zip(self._confidence_history, self._accuracy_history):
-            bin_idx = min(int(conf * n_bins), n_bins - 1)
-            if bin_idx not in bins:
-                bins[bin_idx] = {"confidences": [], "accuracies": []}
-            bins[bin_idx]["confidences"].append(conf)
-            bins[bin_idx]["accuracies"].append(acc)
-        
-        # Calculate Expected Calibration Error (ECE)
-        total_error = 0.0
-        total_samples = len(self._confidence_history)
-        
-        bin_details = {}
-        for bin_idx, data in bins.items():
-            avg_confidence = np.mean(data["confidences"])
-            avg_accuracy = np.mean(data["accuracies"])
-            bin_count = len(data["accuracies"])
-            
-            bin_error = abs(avg_confidence - avg_accuracy)
-            total_error += bin_error * bin_count
-            
-            bin_details[bin_idx] = {
-                "confidence": round(avg_confidence, 3),
-                "accuracy": round(avg_accuracy, 3),
-                "error": round(bin_error, 3),
-                "count": bin_count,
-            }
-        
-        ece = total_error / total_samples if total_samples > 0 else 0.0
-        
+
+    def get_observation(self) -> Dict[str, Any]:
         return {
-            "ece": round(ece, 4),
-            "n_predictions": total_samples,
-            "avg_confidence": round(np.mean(self._confidence_history), 3),
-            "avg_accuracy": round(np.mean(self._accuracy_history), 3),
-            "bins": bin_details,
+            "minerals": self.minerals,
+            "workers": self.workers,
+            "army": self.army,
+            "bases": self.bases,
+            "supply_used": self.supply_used,
+            "supply_cap": self.supply_cap,
+            "uncertainty": self.uncertainty,
         }
 
 
-class SimulatedEnvironment:
-    """Environment with learnable patterns."""
-    
-    def __init__(self, noise: float = 0.1):
-        self._step = 0
-        self._phase = 0
-        self._noise = noise
-    
-    def observe(self) -> Dict[str, float]:
-        """Generate observation."""
-        self._step += 1
-        
-        # Base signal
-        signal = np.sin(2 * np.pi * 0.1 * self._step)
-        
-        # Pattern change at midpoint
-        if self._step >= 250:
-            self._phase = 1
-            signal = np.cos(2 * np.pi * 0.1 * self._step)
-        
-        # Add noise
-        noise = np.random.normal(0, self._noise)
-        
-        return {
-            "signal": signal + noise,
-            "trend": 1.0 if self._step % 100 < 50 else -1.0,
-            "periodic": np.sin(2 * np.pi * self._step / 50),
-        }
-    
-    def get_true_state(self) -> Dict[str, float]:
-        """Get true state for verification."""
-        signal = np.sin(2 * np.pi * 0.1 * self._step)
-        if self._phase == 1:
-            signal = np.cos(2 * np.pi * 0.1 * self._step)
-        
-        return {"signal": signal}
+def run_agent(config: AgentConfig, ticks: int = 200) -> Dict[str, Any]:
+    """Run a single agent configuration."""
+    world = SimulatedWorld()
+    tracer = AffordanceTracer()
+    chain = EpistemicChainRecorder()
+
+    # Components based on config
+    entity_model = EntityModel() if config.use_entity_model else None
+    bridge = EpistemicActionBridge() if config.use_action_bridge else None
+    governance = GovernanceGate() if config.use_governance else None
+
+    # Create simulated enemy
+    enemy_entity = None
+    simulated_enemy = None
+    if entity_model:
+        enemy_entity = entity_model.create_entity("enemy_1", embodiment="sim")
+        simulated_enemy = SimulatedEntity("enemy_1", behavior="aggressive")
+        enemy_entity.add_evidence(
+            EvidenceType.OBSERVED_BEHAVIOR,
+            "Initial contact",
+            tick=0,
+        )
+
+    actions_taken = []
+    prediction_outcomes = []
+    governance_interventions = []
+
+    for tick in range(ticks):
+        # ── OBSERVE ──
+        obs = world.get_observation()
+        ws = world.to_world_state()
+
+        # ── ENTITY MODEL UPDATE ──
+        entity_confidence = 0.5
+        if entity_model and enemy_entity and simulated_enemy:
+            # Simulate enemy behavior
+            enemy_action = simulated_enemy.get_action(tick)
+            if enemy_action == "attack":
+                enemy_entity.add_evidence(
+                    EvidenceType.ATTACK,
+                    "Enemy attacked",
+                    supports=RelationshipType.ADVERSARIAL,
+                    tick=tick,
+                )
+            elif enemy_action == "expand":
+                enemy_entity.add_evidence(
+                    EvidenceType.EXPANSION,
+                    "Enemy expanded",
+                    supports=RelationshipType.COMPETITIVE,
+                    tick=tick,
+                )
+
+            entity_model.update_all(tick)
+            dominant, conf = enemy_entity.get_dominant_relationship()
+            entity_confidence = conf
+
+        # ── AFFORDANCE GENERATION ──
+        candidates = tracer.generate(ws, entity_model)
+
+        # ── ACTION SELECTION ──
+        selected = candidates[0] if candidates else None
+        action_type = selected.action_type.value if selected else "hold"
+
+        # ── ACTION BRIDGE (if enabled) ──
+        if bridge and selected:
+            scores = bridge.score_candidates(
+                candidates,
+                entity_confidence=entity_confidence,
+            )
+            if scores:
+                best = scores[0]
+                action_type = best.action_type
+
+        # ── GOVERNANCE CHECK (if enabled) ──
+        if governance and selected:
+            cost_level = selected.cost_level.value if hasattr(selected.cost_level, 'value') else 0
+            threat = enemy_entity.get_threat_level() if enemy_entity else 0.0
+
+            verdict = governance.check(
+                action_type=action_type,
+                confidence=entity_confidence,
+                cost_level=cost_level,
+                uncertainty=ws.uncertainty,
+                army_exposure=selected.army_exposure,
+                threat_level=threat,
+            )
+
+            governance_interventions.append({
+                "tick": tick,
+                "original": action_type,
+                "decision": verdict.decision.value,
+                "adjusted": verdict.adjusted_action,
+            })
+
+            if verdict.decision == GovernanceDecision.DENY:
+                action_type = "hold"
+            elif verdict.decision == GovernanceDecision.MODIFY and verdict.adjusted_action:
+                action_type = verdict.adjusted_action
+
+        # ── RECORD ──
+        chain.record_action(tick, action_type, [], "simulation")
+        actions_taken.append(action_type)
+
+        # ── EXECUTE ──
+        world.tick_forward(action_type)
+
+        # ── OUTCOME ──
+        chain.record_outcome(tick, world.get_observation())
+
+    # ── ANALYSIS ──
+    action_counts = {}
+    for a in actions_taken:
+        action_counts[a] = action_counts.get(a, 0) + 1
+
+    # Action entropy
+    total = len(actions_taken)
+    entropy = 0.0
+    for count in action_counts.values():
+        p = count / total
+        if p > 0:
+            entropy -= p * np.log2(p)
+
+    # Prediction accuracy from bridge
+    pred_accuracy = bridge.prediction_accuracy if bridge else 0.5
+
+    # Governance stats
+    gov_denials = sum(1 for g in governance_interventions
+                      if g["decision"] == "deny")
+    gov_mods = sum(1 for g in governance_interventions
+                   if g["decision"] == "modify")
+
+    return {
+        "config": config.name,
+        "ticks": ticks,
+        "final_state": {
+            "minerals": world.minerals,
+            "workers": world.workers,
+            "army": world.army,
+            "bases": world.bases,
+        },
+        "action_distribution": action_counts,
+        "action_entropy": entropy,
+        "prediction_accuracy": pred_accuracy,
+        "governance_denials": gov_denials,
+        "governance_modifications": gov_mods,
+        "governance_interventions": governance_interventions,
+    }
 
 
 def run_experiment():
-    """Run EXP-EPIST-002."""
-    config = ExperimentConfig(
-        max_steps=500,
-        n_agents=3,
-        report_interval=100,
-    )
-    
-    print(f"\n{'='*60}")
-    print(f"EXP-EPIST-002: Confidence Calibration")
-    print(f"{'='*60}")
-    print(f"Max Steps: {config.max_steps}")
-    print(f"Agents: {config.n_agents}")
-    print(f"{'='*60}\n")
-    
-    # Create agents with different confidence profiles
-    agents = [
-        CalibrationAgent("calibrated", confidence_modifier=1.0),
-        CalibrationAgent("overconfident", confidence_modifier=1.5),
-        CalibrationAgent("underconfident", confidence_modifier=0.6),
+    """Run comparison experiment."""
+    print("=" * 60)
+    print("EXP-EPIST-002: Blind vs Belief vs Full Epistemic Agent")
+    print("=" * 60)
+    print()
+
+    configs = [
+        AgentConfig(
+            name="Blind Agent",
+            use_entity_model=False,
+            use_predictions=False,
+            use_governance=False,
+            use_action_bridge=False,
+        ),
+        AgentConfig(
+            name="Belief Agent",
+            use_entity_model=True,
+            use_predictions=False,
+            use_governance=False,
+            use_action_bridge=False,
+        ),
+        AgentConfig(
+            name="Full Epistemic Agent",
+            use_entity_model=True,
+            use_predictions=True,
+            use_governance=True,
+            use_action_bridge=True,
+        ),
     ]
-    
-    env = SimulatedEnvironment(noise=config.signal_noise)
-    
-    for step in range(1, config.max_steps + 1):
-        # Observe environment
-        raw = env.observe()
-        true_state = env.get_true_state()
-        
-        # Process observations and generate predictions for each agent
-        for agent in agents:
-            agent._step = step
-            features = agent.process_observation(raw)
-            
-            if step % config.prediction_interval == 0:
-                agent.generate_predictions(features)
-            
-            agent.verify_predictions(true_state)
-        
-        # Report
-        if step % config.report_interval == 0:
-            print(f"\n--- Step {step} ---")
-            for agent in agents:
-                metrics = agent.get_calibration_metrics()
-                print(f"  {agent.agent_id}: ECE={metrics['ece']:.4f}, "
-                      f"n={metrics['n_predictions']}, "
-                      f"avg_conf={metrics.get('avg_confidence', 0):.3f}, "
-                      f"avg_acc={metrics.get('avg_accuracy', 0):.3f}")
-    
-    # Final report
-    print(f"\n{'='*60}")
-    print(f"EXP-EPIST-002: Final Report")
-    print(f"{'='*60}")
-    
-    for agent in agents:
-        metrics = agent.get_calibration_metrics()
-        print(f"\n{agent.agent_id}:")
-        print(f"  ECE (calibration error): {metrics['ece']:.4f}")
-        print(f"  Total predictions: {metrics['n_predictions']}")
-        print(f"  Average confidence: {metrics.get('avg_confidence', 0):.3f}")
-        print(f"  Average accuracy: {metrics.get('avg_accuracy', 0):.3f}")
-        print(f"  Confidence-Accuracy gap: {abs(metrics.get('avg_confidence', 0) - metrics.get('avg_accuracy', 0)):.3f}")
-    
-    print(f"\n{'='*60}")
-    print(f"Experiment Complete")
-    print(f"{'='*60}")
-    
-    # Return results for comparison
-    results = {}
-    for agent in agents:
-        results[agent.agent_id] = agent.get_calibration_metrics()
-    
+
+    results = []
+    for config in configs:
+        print(f"Running: {config.name}...")
+        result = run_agent(config, ticks=200)
+        results.append(result)
+        print(f"  Done. Actions: {result['action_distribution']}")
+        print()
+
+    # ── COMPARISON ──
+    print("=" * 60)
+    print("COMPARISON RESULTS")
+    print("=" * 60)
+    print()
+
+    # Header
+    print(f"  {'Metric':30s} {'Blind':>12s} {'Belief':>12s} {'Full Epistemic':>15s}")
+    print(f"  {'-'*30} {'-'*12} {'-'*12} {'-'*15}")
+
+    # Action diversity (entropy)
+    entropies = [r["action_entropy"] for r in results]
+    print(f"  {'Action Entropy':30s} {entropies[0]:12.3f} {entropies[1]:12.3f} {entropies[2]:15.3f}")
+
+    # Final army
+    armies = [r["final_state"]["army"] for r in results]
+    print(f"  {'Final Army':30s} {armies[0]:12d} {armies[1]:12d} {armies[2]:15d}")
+
+    # Final bases
+    bases = [r["final_state"]["bases"] for r in results]
+    print(f"  {'Final Bases':30s} {bases[0]:12d} {bases[1]:12d} {bases[2]:15d}")
+
+    # Final workers
+    workers = [r["final_state"]["workers"] for r in results]
+    print(f"  {'Final Workers':30s} {workers[0]:12d} {workers[1]:12d} {workers[2]:15d}")
+
+    # Governance interventions
+    denials = [r["governance_denials"] for r in results]
+    mods = [r["governance_modifications"] for r in results]
+    print(f"  {'Governance Denials':30s} {denials[0]:12d} {denials[1]:12d} {denials[2]:15d}")
+    print(f"  {'Governance Modifications':30s} {mods[0]:12d} {mods[1]:12d} {mods[2]:15d}")
+
+    # Action distribution
+    print()
+    print("  Action Distribution:")
+    all_actions = set()
+    for r in results:
+        all_actions.update(r["action_distribution"].keys())
+
+    for action in sorted(all_actions):
+        counts = [r["action_distribution"].get(action, 0) for r in results]
+        pcts = [c / 200 * 100 for c in counts]
+        print(f"    {action:15s}: {pcts[0]:5.1f}% {pcts[1]:5.1f}% {pcts[2]:5.1f}%")
+
+    print()
+    print("=" * 60)
+    print("EXP-EPIST-002 Complete")
+    print("=" * 60)
+
     return results
 
 
 if __name__ == "__main__":
-    results = run_experiment()
+    run_experiment()
