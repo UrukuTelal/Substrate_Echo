@@ -61,7 +61,10 @@ class LiveBot(BotAI):
         self.trust = EpistemicTrustSystem()
         self.observatory = EpistemicObservatory()
         self.chain = EpistemicChainRecorder()
-        self.entities = EntityModel()
+        self.entity_model = EntityModel()
+        self.affordance_tracer = AffordanceTracer()
+        self.action_bridge = EpistemicActionBridge()
+        self.governance_gate = GovernanceGate()
 
         # State
         self._step = 0
@@ -70,7 +73,20 @@ class LiveBot(BotAI):
         self._start_time = 0.0
         self._prev_observation: Optional[Dict] = None
 
+    def _validate_kernel(self):
+        required = [
+            "entity_model",
+            "affordance_tracer",
+            "action_bridge",
+            "governance_gate",
+            "chain",
+        ]
+        missing = [x for x in required if not hasattr(self, x) or getattr(self, x) is None]
+        if missing:
+            raise RuntimeError(f"Epistemic kernel missing: {missing}")
+
     def on_start(self):
+        self._validate_kernel()
         self._start_time = time.time()
         print(f"\n{'='*60}")
         print(f"  SUBSTRATE ECHO — SC2 LIVE GAME")
@@ -171,11 +187,11 @@ class LiveBot(BotAI):
 
         # ── 4. ENTITY MODEL: track enemy ──
         if self._step == 1:
-            self.entities.create_entity("enemy", embodiment="sc2")
+            self.entity_model.create_entity("enemy", embodiment="sc2")
 
         # Simple enemy observation: if we see enemy units
         if hasattr(self, 'enemy_units') and self.enemy_units:
-            enemy = self.entities.get_entity("enemy")
+            enemy = self.entity_model.get_entity("enemy")
             if enemy:
                 enemy.add_evidence(
                     EvidenceType.OBSERVED_BEHAVIOR,
@@ -223,7 +239,7 @@ class LiveBot(BotAI):
 
         # ── 8. PERIODIC ENTITY UPDATE ──
         if self._step % 100 == 0:
-            self.entities.update_all(self._step)
+            self.entity_model.update_all(self._step)
 
         # ── 9. STATUS ──
         if self._step % 500 == 0:
@@ -456,7 +472,7 @@ class LiveBot(BotAI):
 
         # ── ENTITY MODEL ──
         print()
-        print(self.entities.render())
+        print(self.entity_model.render())
 
         # ── OBSERVATION GAP DETECTION ──
         gaps = [
