@@ -35,9 +35,9 @@ from substrate_echo.epistemology.trust import EpistemicTrustSystem
 from substrate_echo.epistemology.observatory import EpistemicObservatory
 from substrate_echo.epistemology.chain_recorder import EpistemicChainRecorder, AnomalyType
 from substrate_echo.epistemology.entity_model import EntityModel, EvidenceType, RelationshipType
-from substrate_echo.epistemology.affordance_tracer import AffordanceTracer
+from substrate_echo.epistemology.affordance_tracer import AffordanceTracer, WorldState
 from substrate_echo.epistemology.action_bridge import EpistemicActionBridge
-from substrate_echo.epistemology.governance_gate import GovernanceGate
+from substrate_echo.epistemology.governance_gate import GovernanceGate, GovernanceDecision
 
 
 # ── Bot ───────────────────────────────────────────────────────────
@@ -192,13 +192,22 @@ class LiveBot(BotAI):
         if self._step == 1:
             self.entity_model.create_entity("enemy", embodiment="sc2")
 
-        # Simple enemy observation: if we see enemy units
-        if hasattr(self, 'enemy_units') and self.enemy_units:
-            enemy = self.entity_model.get_entity("enemy")
-            if enemy:
+        # Feed enemy observations
+        enemy = self.entity_model.get_entity("enemy")
+        if enemy:
+            enemy_count = len(self.known_enemy_units)
+            enemy_struct_count = len(self.known_enemy_structures)
+
+            if enemy_count > 0:
                 enemy.add_evidence(
                     EvidenceType.OBSERVED_BEHAVIOR,
-                    f"Enemy units visible: {len(self.enemy_units)}",
+                    f"Enemy units visible: {enemy_count}",
+                    tick=self._step,
+                )
+            if enemy_struct_count > 0:
+                enemy.add_evidence(
+                    EvidenceType.OBSERVED_BEHAVIOR,
+                    f"Enemy structures visible: {enemy_struct_count}",
                     tick=self._step,
                 )
 
@@ -260,29 +269,75 @@ class LiveBot(BotAI):
             })
 
     def _interpret_action(self, cs: CognitiveState) -> Optional[Dict[str, Any]]:
-        """Convert kernel action vector to SC2 action."""
-        if not cs.action or not cs.action.vector:
+        """Full epistemic action selection: affordance→bridge→governance."""
+        # ── 1. BUILD WORLD STATE ──
+        world = WorldState.from_botai(self, tick=self._step)
+
+        # ── 2. ENTITY MODEL: update threat ──
+        enemy_entity = self.entity_model.get_entity("enemy")
+        entity_confidence = 0.5
+        threat_level = 0.0
+        if enemy_entity:
+            dominant, conf = enemy_entity.get_dominant_relationship()
+            entity_confidence = conf
+            threat_level = enemy_entity.get_threat_level()
+
+        # ── 3. GENERATE AFFORDANCES ──
+        candidates = self.affordance_tracer.generate(world, entities=None)
+
+        if not candidates:
             return self._fallback_action()
 
-        vec = np.array(cs.action.vector)
-        # Use highest-scoring dimension from the action vector
-        # Dimensions map to: expand, build_army, defend, attack, scout, hold
-        labels = ["expand", "build_army", "defend", "attack", "scout", "hold"]
+        # ── 4. SCORE THROUGH ACTION BRIDGE ──
+        scored = []
+        for c in candidates:
+            action_score = self.action_bridge.score_action(
+                c,
+                entity_confidence=entity_confidence,
+                prediction_accuracy=self.action_bridge.prediction_accuracy,
+            )
+            scored.append((c, action_score))
 
-        if len(vec) >= len(labels):
-            best_idx = int(np.argmax(vec[:len(labels)]))
-            best_score = vec[best_idx]
-        elif len(vec) > 0:
-            best_idx = int(np.argmax(vec))
-            best_score = vec[best_idx]
+        scored.sort(key=lambda x: x[1].final_score, reverse=True)
+        best_candidate, best_score_obj = scored[0]
+
+        # ── 5. GOVERNANCE GATE ──
+        army_count = len(self.units.exclude_type({UnitTypeId.SCV, UnitTypeId.MULE}))
+        total_units = max(1, len(self.units))
+        army_exposure = army_count / total_units
+
+        verdict = self.governance_gate.check(
+            action_type=best_candidate.action_type.value,
+            confidence=entity_confidence,
+            cost_level=best_candidate.cost_level.value,
+            uncertainty=world.uncertainty,
+            army_exposure=army_exposure,
+            threat_level=threat_level,
+        )
+
+        # ── 6. APPLY VERDICT ──
+        if verdict.decision == GovernanceDecision.DENY:
+            action_type = "hold"
+        elif verdict.decision == GovernanceDecision.MODIFY:
+            action_type = verdict.adjusted_action or "hold"
         else:
-            return self._fallback_action()
+            action_type = best_candidate.action_type.value
 
-        # Use fallback if kernel output is too uncertain
-        if best_score < 0.1:
-            return self._fallback_action()
+        # Record the full reasoning in the chain
+        self.chain.record_hypothesis(
+            tick=self._step,
+            hypothesis=f"Best affordance: {best_candidate.action_type.value} "
+                       f"(score={best_score_obj.final_score:.3f})",
+            confidence=entity_confidence,
+        )
+        self.chain.record_prediction(
+            tick=self._step,
+            prediction={"action": action_type, "description": best_candidate.description},
+            confidence=entity_confidence,
+            verify_at_tick=self._step + 5,
+        )
 
-        return {"type": labels[best_idx]}
+        return {"type": action_type}
 
     def _fallback_action(self) -> Dict[str, Any]:
         """Simple rule-based fallback."""
@@ -311,6 +366,8 @@ class LiveBot(BotAI):
             await self._do_expand()
         elif action_type == "build_army":
             await self._do_build_army()
+        elif action_type == "build_economy":
+            await self._do_build_army()
         elif action_type == "defend":
             await self._do_defend()
         elif action_type == "attack":
@@ -331,18 +388,18 @@ class LiveBot(BotAI):
         if not self.townhalls:
             return
 
+        # Build supply FIRST — blocks everything else
+        if self.supply_used >= self.supply_cap - 3 and self.minerals >= 100:
+            if self.can_afford(UnitTypeId.SUPPLYDEPOT):
+                await self.build(UnitTypeId.SUPPLYDEPOT, near=self.townhalls.first.position)
+                return
+
         # Build SCVs if needed
         workers = self.units.of_type(UnitTypeId.SCV)
         if len(workers) < 22:
             tc = self.townhalls.first
             if tc.is_idle and self.can_afford(UnitTypeId.SCV):
-                tc.train(UnitTypeId.SCV)
-                return
-
-        # Build supply if needed
-        if self.supply_used >= self.supply_cap - 3:
-            if self.can_afford(UnitTypeId.SUPPLYDEPOT):
-                await self.build(UnitTypeId.SUPPLYDEPOT, near=self.townhalls.first.position)
+                await self.do(tc.train(UnitTypeId.SCV))
                 return
 
         # Build barracks if none
@@ -354,22 +411,24 @@ class LiveBot(BotAI):
         # Train marines
         for b in barracks:
             if b.is_idle and self.can_afford(UnitTypeId.MARINE):
-                b.train(UnitTypeId.MARINE)
+                await self.do(b.train(UnitTypeId.MARINE))
 
     async def _do_defend(self):
         army = self.units.exclude_type({UnitTypeId.SCV, UnitTypeId.MULE})
         if army and self.townhalls:
-            army.move(self.townhalls.first.position)
+            for unit in army:
+                await self.do(unit.move(self.townhalls.first.position))
 
     async def _do_attack(self):
         army = self.units.exclude_type({UnitTypeId.SCV, UnitTypeId.MULE})
         if army and self.enemy_start_locations:
-            army.attack(self.enemy_start_locations[0])
+            for unit in army:
+                await self.do(unit.attack(self.enemy_start_locations[0]))
 
     async def _do_scout(self):
         scvs = self.units.of_type(UnitTypeId.SCV)
         if scvs and self.enemy_start_locations:
-            scvs.first.move(self.enemy_start_locations[0])
+            await self.do(scvs.first.move(self.enemy_start_locations[0]))
 
     def _find_expansion(self):
         if self.expansion_locations:

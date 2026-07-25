@@ -166,6 +166,8 @@ class WorldState:
             production_buildings=production,
             army_count=len(army),
             army_value=sum(u.health + u.shield for u in army),
+            enemy_units_seen=len(bot.known_enemy_units),
+            enemy_bases_known=len(bot.known_enemy_structures),
             current_tick=tick,
             game_phase=phase,
         )
