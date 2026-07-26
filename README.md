@@ -110,7 +110,9 @@ substrate_echo/
 │   ├── prediction.py           # PredictionEngine, PredictionMemory
 │   ├── rule_discovery.py       # PatternDetector, RuleDiscoveryEngine
 │   ├── development_record.py   # History of becoming
-│   └── perturbation.py         # Causal discovery through intervention
+│   ├── perturbation.py         # Causal discovery through intervention
+│   ├── tactical_brain.py       # Observe→hypothesize→experiment→learn (SC2)
+│   └── replay_auditor.py       # Tick-by-tick failure analysis (SC2)
 ├── external/         # Epistemic firewall for external agents
 ├── social/           # Persona genomes, relationship dynamics
 ├── models/           # Data structures (Experience, MemoryTrace, etc.)
@@ -122,7 +124,7 @@ scripts/
 ├── experiments/      # Reproducible experiments (EXP-SUB-001 through 005)
 └── demo_kernel.py    # Kernel demo: two embodiments sharing one mind
 
-tests/                # 772 automated tests
+tests/                # 798 automated tests
 ```
 
 ## Implementation Plan
@@ -204,6 +206,18 @@ SC2 is now a controllable external environment for Substrate_Echo.
 - SC2 Council: Diplomat, Trust Analyst, Negotiator, Adversary Model
 - Truce Mode: Alternative optimization landscape for cooperative play
 
+**Tactical Brain (Observe → Hypothesize → Experiment → Learn):**
+- Pure learning: no hardcoded counter knowledge. All hypotheses from battle outcomes.
+- Mid-game adaptation: observes enemy composition → suggests counter units → switches production
+- Cross-game learning: persists hypotheses and experiments across games via JSON
+- UnitClassifier integration: role-aware army selection, anti-air prioritization
+- BaseSaturation: real per-base worker saturation from SC2 API `ideal_harvesters`
+
+**Replay Auditor (Tick-by-Tick Failure Analysis):**
+- 10 failure detectors: supply block, idle production, mineral float, army idle, unit loss wave, action degeneration, late expansion, defense gap, economy stall, poor composition
+- Severity scoring (LOW → CRITICAL) with automatic detection during gameplay
+- Full audit report in JSON output with improvement tracking across games
+
 **Connection Verified:**
 ```text
 500 steps completed successfully against Easy AI
@@ -232,7 +246,7 @@ EXP-SC2-004  Companion Mode Test                       ✓
 
 ```bash
 pip install -e .
-pytest tests/ -q  # 772 tests
+pytest tests/ -q  # 798 tests
 ```
 
 Run the kernel demo:

@@ -30,7 +30,7 @@ substrate_echo/
 
 ## Key Results
 
-- 700+ automated tests
+- 798+ automated tests
 - External agent integration with verification-driven trust
 - Social persona ecology with stable personality differentiation
 - Latent provenance tracking (attractor → source audit trail)

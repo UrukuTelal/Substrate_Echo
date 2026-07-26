@@ -2,6 +2,53 @@
 
 All notable changes to Substrate_Echo will be documented in this file.
 
+## [0.13.0] - 2026-07-25
+
+### Added — TacticalBrain + ReplayAuditor
+
+**TacticalBrain (epistemology/tactical_brain.py):**
+- `BattleState`: full tick snapshot — per-unit health/shield/attack/speed, base saturation, enemy composition
+- `UnitSnapshot`: individual unit state with effective HP, attack capability, upgrades
+- `BaseSaturation`: per-base worker saturation from SC2 API `ideal_harvesters` (not hardcoded)
+- `EnemyComposition`: type counts, total value, upgrade levels, movement profiles
+- `CounterHypothesis`: "unit X counters composition Y" — confidence from battle outcomes only
+- `Experiment`: mid-game test — build N of hypothesized counter, track K/D, validate
+- `TacticalBrain`: orchestrates observe → hypothesize → experiment → evaluate (pure learning, no hardcoded counters)
+- Cross-game persistence via JSON (`data/tactical_brain.json`)
+
+**ReplayAuditor (epistemology/replay_auditor.py):**
+- `TickSnapshot`: one frame of game state (units, resources, supply, actions, army value)
+- `FailurePoint`: detected issue with tick, severity, category, description, context
+- `AuditReport`: full game analysis — severity/category counts, peak metrics, action diversity (Shannon entropy)
+- 10 failure detectors:
+  - `SUPPLY_BLOCKED`: supply_used >= cap-2 for 10+ ticks with minerals
+  - `IDLE_PRODUCTION`: all production buildings idle for 20+ ticks
+  - `MINERAL_FLOAT`: minerals > 500 for 15+ ticks
+  - `ARMY_IDLE`: 5+ army units doing nothing for 30+ ticks
+  - `UNIT_LOSS_WAVE`: 5+ units lost in 100-tick window
+  - `ACTION_DEGENERATE`: same action 10+ times in a row
+  - `LATE_EXPANSION`: no expansion by tick 3000
+  - `DEFENSE_GAP`: enemy visible, 0 army (CRITICAL)
+  - `ECONOMY_STALLED`: worker count drops significantly
+  - `POOR_COMPOSITION`: army comp doesn't counter enemy
+- Wired into IterateBot: `record_tick()` every tick, `analyze()` at game end
+- Audit report in JSON output, improvement comparison includes failure metrics
+
+**SC2 Bot Wiring (scripts/sc2_iterate_01.py):**
+- TacticalBrain state capture every 5 ticks in `on_step()`
+- Counter-unit selection in `_exec_train()`: suggests counter units when confidence > 0.3
+- Battle outcome tracking in `_exec_attack()`: records pre-battle composition, evaluates 20-40 ticks later
+- Real per-base saturation from SC2 API `ideal_harvesters` in `_update_drives()`
+- TacticalBrain persistence: saves every 500 ticks + at game end
+
+**External Agent Pipeline:**
+- Fixed crowquant dependency (`pip install -e /c/Projects/crowquant`)
+- `test_external_agents.py` now runs (65 tests, all passing)
+
+### Tests
+- 798 tests passing (26 new auditor tests + 65 external agent tests restored)
+- `test_replay_auditor.py`: 26 tests covering all 10 failure detectors, report generation, snapshot properties
+
 ## [0.12.0] - 2026-07-23
 
 ### Added — SC2 Embodiment (COMPLETE ✓)
