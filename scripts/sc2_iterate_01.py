@@ -48,10 +48,13 @@ from substrate_echo.epistemology.replay_parser import ReplayParser, ReplayLearni
 from substrate_echo.embodiments.sc2.unit_classifier import (
     UnitClassifier, Role, Movement, AttackCapability,
 )
+from substrate_echo.epistemology.tactical_brain import TacticalBrain, BattleState
+from substrate_echo.epistemology.replay_auditor import ReplayAuditor
 
 
 MODEL_PATH = str(Path(__file__).parent.parent / "data" / "affordance_models.json")
 LOG_PATH = str(Path(__file__).parent.parent / "data" / "iteration_log.jsonl")
+TACTICAL_BRAIN_PATH = str(Path(__file__).parent.parent / "data" / "tactical_brain.json")
 
 
 class IterateBot(BotAI):
@@ -94,6 +97,8 @@ class IterateBot(BotAI):
 
         self.perceiver = GameStatePerceiver()
         self._unit_classifier = UnitClassifier()
+        self.tactical_brain = TacticalBrain()
+        self.auditor = ReplayAuditor()
         self._my_player_id = None
         self._chat_log: List[Dict] = []
         self._last_failed_ability = None
@@ -123,9 +128,16 @@ class IterateBot(BotAI):
         self._last_action_tick = 0
         self._action_delay_history: List[int] = []  # track delays tried
         self._delay_performance: Dict[int, List[float]] = {}  # delay -> performance scores
+        self._tactical_state: Optional[BattleState] = None
+        self._last_attack_units: Dict[int, str] = {}  # tag -> unit name
+        self._last_attack_enemies: Dict[int, str] = {}  # tag -> unit name
+        self._last_attack_step: int = 0
 
         if Path(MODEL_PATH).exists():
             self.model_pool.load(MODEL_PATH)
+
+        if Path(TACTICAL_BRAIN_PATH).exists():
+            self.tactical_brain.load(TACTICAL_BRAIN_PATH)
 
     def on_start(self):
         self._start_time = time.time()
@@ -141,6 +153,23 @@ class IterateBot(BotAI):
 
         # Kernel observation (throttled internally)
         raw_vec = self.encoder.encode_from_botai(self)
+
+        # Tactical brain: full state capture + battle analysis (every 5 ticks)
+        if self._step % 5 == 0:
+            self._tactical_state = self.tactical_brain.capture_state(self, self._step)
+            battle = self.tactical_brain.analyze_battles(self, self._step)
+            if battle:
+                # Update experiment progress
+                exp = self.tactical_brain.get_active_experiment()
+                if exp and exp.unit_type:
+                    current_count = sum(
+                        1 for u in self.units
+                        if u.name.upper() == exp.unit_type.upper()
+                        and not u.is_structure
+                    )
+                    self.tactical_brain.update_experiment_progress(current_count, self._step)
+        else:
+            self._tactical_state = None
 
         kernel_obs = Observation(
             vector=raw_vec.tolist(),
@@ -166,6 +195,9 @@ class IterateBot(BotAI):
 
         action = self._interpret_action()
         action_type = action.get("type", "hold") if action else "hold"
+
+        # Auditor: record tick for failure analysis
+        self.auditor.record_tick(self._step, self, action_type)
 
         # Chain recording (throttled — every 5 ticks)
         if self._step % 5 == 0:
@@ -218,25 +250,79 @@ class IterateBot(BotAI):
             loop = asyncio.get_event_loop()
             loop.run_in_executor(None, self.model_pool.save, MODEL_PATH)
 
+        # Battle outcome tracking: evaluate results 20-40 ticks after attack
+        if (self._last_attack_units and self._last_attack_step > 0
+                and self._step - self._last_attack_step in (20, 30, 40)):
+            # Check how many of our attack units survived
+            our_survivors = sum(
+                1 for tag in self._last_attack_units
+                if any(u.tag == tag for u in self.units)
+            )
+            our_killed = len(self._last_attack_units) - our_survivors
+
+            # Check how many enemy units we killed (were alive at attack, now gone)
+            enemy_killed = sum(
+                1 for tag, name in self._last_attack_enemies.items()
+                if not any(eu.tag == tag for eu in self.known_enemy_units)
+            )
+            enemy_survivors = len(self._last_attack_enemies) - enemy_killed
+
+            total_engaged = len(self._last_attack_units) + len(self._last_attack_enemies)
+            if total_engaged > 0 and self._tactical_state:
+                self.tactical_brain.record_battle_outcome(
+                    step=self._step,
+                    our_composition=self._last_attack_units,
+                    enemy_composition=self._last_attack_enemies,
+                    our_killed=our_killed,
+                    enemy_killed=enemy_killed,
+                    outcome="won" if enemy_killed > our_killed else "lost",
+                )
+
+            # Clear tracking after evaluation
+            if self._step - self._last_attack_step > 40:
+                self._last_attack_units = {}
+                self._last_attack_enemies = {}
+
+        # Save tactical brain every 500 ticks
+        if self._step % 500 == 0:
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(None, self.tactical_brain.save, TACTICAL_BRAIN_PATH)
+
     def _update_drives(self, workers, army, bases):
-        # Mineral income: workers NOT on gas
-        gas_workers = 0
-        for u in self.workers:
-            try:
-                if u.orders and any(
-                    "EXTRACTOR" in str(o.ability) or
-                    "ASSIMILATOR" in str(o.ability) or
-                    "REFINERY" in str(o.ability)
-                    for o in u.orders):
-                    gas_workers += 1
-            except (KeyError, Exception):
-                pass
+        # Use tactical brain for real per-base saturation from SC2 API
+        if self._tactical_state:
+            sat = self.tactical_brain.get_saturation_status(self._tactical_state)
+            optimal_mineral_workers = sat["total_ideal"]
+            # Count workers on gas from actual assignments
+            gas_workers = 0
+            for u in self.workers:
+                try:
+                    if u.orders and any(
+                        "EXTRACTOR" in str(o.ability) or
+                        "ASSIMILATOR" in str(o.ability) or
+                        "REFINERY" in str(o.ability)
+                        for o in u.orders):
+                        gas_workers += 1
+                except (KeyError, Exception):
+                    pass
+        else:
+            # Fallback: estimate from API if tactical state unavailable
+            gas_workers = 0
+            for u in self.workers:
+                try:
+                    if u.orders and any(
+                        "EXTRACTOR" in str(o.ability) or
+                        "ASSIMILATOR" in str(o.ability) or
+                        "REFINERY" in str(o.ability)
+                        for o in u.orders):
+                        gas_workers += 1
+                except (KeyError, Exception):
+                    pass
+            optimal_mineral_workers = bases * 16
+
         mineral_workers = max(0, workers - gas_workers)
-        
-        # Optimal saturation per base: 8 mineral fields * 2 workers + 2 gas geysers * 3 workers
-        optimal_mineral_workers = bases * 16  # 8 patches * 2 workers each
-        optimal_gas_workers = bases * 6       # 2 geysers * 3 workers each
-        
+        optimal_gas_workers = bases * 6
+
         minerals = min(1.0, mineral_workers / max(1, optimal_mineral_workers))
         gas = min(1.0, gas_workers / max(1, optimal_gas_workers))
         supply = (self.supply_cap - self.supply_used) / max(1, self.supply_cap) if self.supply_cap > 0 else 0.5
@@ -496,6 +582,27 @@ class IterateBot(BotAI):
 
         # If diminishing returns, train army instead of workers
         if self._diminishing_returns and self.workers:
+            # Counter-unit override: if tactical brain suggests a specific unit, try it first
+            suggested_type = None
+            if self._tactical_state and self._tactical_state.enemy_army:
+                suggestion = self.tactical_brain.suggest_counter_unit(self._tactical_state)
+                if suggestion:
+                    suggested_type, confidence = suggestion
+                    if confidence < 0.3:
+                        suggested_type = None  # too low confidence
+
+            if suggested_type:
+                # Try to build the suggested counter-unit
+                for unit, ability in caps:
+                    if ability == skip:
+                        continue
+                    aname = ability.name
+                    if "TRAIN" in aname or "MORPH" in aname:
+                        if suggested_type.upper() in aname:
+                            if unit.is_idle and self.can_afford(ability):
+                                await self.do(unit(ability))
+                                return
+
             for unit, ability in caps:
                 if ability == skip:
                     continue
@@ -637,6 +744,8 @@ class IterateBot(BotAI):
         - If enemy has visible air units, prioritize anti-air + dual-attack units
         - Dual-attack units (can hit both air and ground) are always included
         - Workers, overlords, and spawned units excluded
+
+        Tracks battle composition for TacticalBrain hypothesis generation.
         """
         if not self.enemy_start_locations:
             return
@@ -671,6 +780,11 @@ class IterateBot(BotAI):
             and self._unit_classifier.classify(eu).movement == Movement.AIR
         ]
 
+        # Record pre-battle composition for hypothesis tracking
+        if self._tactical_state and len(combat_units) >= 3:
+            self._last_attack_units = {u.tag: u.name.upper() for u in combat_units}
+            self._last_attack_step = self._step
+
         if enemy_air:
             # Prioritize: dual-attack units first, then anti-air-only
             dual = self._unit_classifier.filter_dual_attack(combat_units)
@@ -685,6 +799,17 @@ class IterateBot(BotAI):
             attack_group = dual + anti_air_only if (dual or anti_air_only) else combat_units
         else:
             attack_group = combat_units
+
+        # Record which enemies are engaged for outcome tracking
+        if self._tactical_state and self.known_enemy_units:
+            visible_enemy = [
+                eu for eu in self.known_enemy_units
+                if not eu.is_structure
+                and eu.type_id.name.upper() not in spawned_names
+                and eu.position.distance_to(target) < 40
+            ]
+            if visible_enemy:
+                self._last_attack_enemies = {eu.tag: eu.name.upper() for eu in visible_enemy}
 
         for unit in attack_group:
             if unit.is_idle or unit.is_moving:
@@ -946,6 +1071,13 @@ class IterateBot(BotAI):
             action_counts[t] = action_counts.get(t, 0) + 1
 
         self.model_pool.save(MODEL_PATH)
+        self.tactical_brain.save(TACTICAL_BRAIN_PATH)
+
+        # Run auditor
+        audit_report = self.auditor.analyze(
+            game_result=str(game_result),
+            game_number=self.config.get("game_number", 0),
+        )
 
         result = {
             "game_number": self.config.get("game_number", 0),
@@ -974,12 +1106,24 @@ class IterateBot(BotAI):
             },
             "chat_log": self._chat_log,
             "perceived_events": self.perceiver.summary(),
+            "tactical_brain": {
+                "battles_recorded": len(self.tactical_brain._battle_log),
+                "hypotheses_generated": len(self.tactical_brain._hypotheses),
+                "hypotheses_validated": len([h for h in self.tactical_brain._hypotheses.values() if h.validated]),
+                "experiments_run": len(self.tactical_brain._experiments),
+                "active_experiment": {
+                    "unit_type": self.tactical_brain.get_active_experiment().unit_type,
+                    "outcome": self.tactical_brain.get_active_experiment().outcome,
+                } if self.tactical_brain.get_active_experiment() else None,
+            },
+            "audit": audit_report.to_dict(),
         }
 
         with open(LOG_PATH, "a") as f:
             f.write(json.dumps(result) + "\n")
 
         print(json.dumps(result, indent=2))
+        print(audit_report.summary_text())
 
     def _integrate_replay_learnings(self, learnings: Dict[str, Any], parsed: ParsedReplay):
         """Integrate replay learnings into the bot's epistemic systems."""
@@ -1254,6 +1398,16 @@ def main():
                             c = curr_actions.get(a, 0)
                             arrow = "up" if c > p else ("down" if c < p else "=")
                             print(f"  {a:15s}: {p:5.1f}% -> {c:5.1f}% ({arrow})")
+                        # Audit comparison
+                        prev_audit = prev.get("audit", {})
+                        curr_audit = curr.get("audit", {})
+                        if prev_audit and curr_audit:
+                            prev_fp = len(prev_audit.get("failure_points", []))
+                            curr_fp = len(curr_audit.get("failure_points", []))
+                            print(f"  Failures: {prev_fp} -> {curr_fp}")
+                            prev_sb = prev_audit.get("supply_blocked_ticks", 0)
+                            curr_sb = curr_audit.get("supply_blocked_ticks", 0)
+                            print(f"  Supply blocked: {prev_sb} -> {curr_sb} ticks")
 
             if args.infinite:
                 time.sleep(2)
