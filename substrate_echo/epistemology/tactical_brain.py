@@ -68,6 +68,10 @@ class UnitSnapshot:
         return self.health > 0 or self.shield > 0
 
     @property
+    def can_attack(self) -> bool:
+        return self.can_attack_air or self.can_attack_ground
+
+    @property
     def effective_hp(self) -> float:
         return self.health + self.shield
 

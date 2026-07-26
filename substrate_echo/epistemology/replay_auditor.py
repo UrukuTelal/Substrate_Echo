@@ -212,6 +212,7 @@ class ReplayAuditor:
         self._supply_block_streak = 0
         self._idle_prod_streak = 0
         self._mineral_float_streak = 0
+        self._mineral_float_peak = 0
         self._army_idle_streak = 0
         self._consecutive_actions: List[str] = []
         self._prev_army_count = 0
@@ -322,16 +323,19 @@ class ReplayAuditor:
     def _detect_mineral_float(self, tick: int, snap: TickSnapshot) -> None:
         if snap.mineral_float:
             self._mineral_float_streak += 1
+            if snap.minerals > self._mineral_float_peak:
+                self._mineral_float_peak = snap.minerals
         else:
             if self._mineral_float_streak >= self._mineral_float_threshold:
                 self._failure_points.append(FailurePoint(
                     tick=tick - self._mineral_float_streak,
                     category=FailureCategory.MINERAL_FLOAT,
                     severity=Severity.MEDIUM if self._mineral_float_streak < 30 else Severity.HIGH,
-                    description=f"Minerals floated above 500 for {self._mineral_float_streak} ticks (peak {snap.minerals})",
-                    context={"duration": self._mineral_float_streak, "peak_minerals": snap.minerals},
+                    description=f"Minerals floated above 500 for {self._mineral_float_streak} ticks (peak {self._mineral_float_peak})",
+                    context={"duration": self._mineral_float_streak, "peak_minerals": self._mineral_float_peak},
                 ))
             self._mineral_float_streak = 0
+            self._mineral_float_peak = 0
 
     def _detect_army_idle(self, tick: int, snap: TickSnapshot) -> None:
         if snap.army_count >= 5 and snap.units_idle == snap.army_count and snap.units_attacking == 0:
@@ -458,13 +462,12 @@ class ReplayAuditor:
             ))
 
         if self._mineral_float_streak >= self._mineral_float_threshold:
-            snap = self._snapshots[-1] if self._snapshots else None
             self._failure_points.append(FailurePoint(
                 tick=last_tick - self._mineral_float_streak,
                 category=FailureCategory.MINERAL_FLOAT,
                 severity=Severity.MEDIUM if self._mineral_float_streak < 30 else Severity.HIGH,
-                description=f"Minerals above 500 for {self._mineral_float_streak} ticks",
-                context={"duration": self._mineral_float_streak, "peak_minerals": snap.minerals if snap else 0},
+                description=f"Minerals above 500 for {self._mineral_float_streak} ticks (peak {self._mineral_float_peak})",
+                context={"duration": self._mineral_float_streak, "peak_minerals": self._mineral_float_peak},
             ))
 
         if self._army_idle_streak >= self._army_idle_threshold:
@@ -527,6 +530,7 @@ class ReplayAuditor:
         self._supply_block_streak = 0
         self._idle_prod_streak = 0
         self._mineral_float_streak = 0
+        self._mineral_float_peak = 0
         self._army_idle_streak = 0
         self._consecutive_actions.clear()
         self._prev_army_count = 0
