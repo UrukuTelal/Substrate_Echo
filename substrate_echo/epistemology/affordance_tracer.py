@@ -29,6 +29,10 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 
+from substrate_echo.embodiments.sc2.unit_classifier import (
+    UnitClassifier, Role, Movement, AttackCapability,
+)
+
 
 class SC2ActionType(Enum):
     """Available SC2 actions as affordance categories."""
@@ -81,9 +85,29 @@ class AffordanceCandidate:
     requires_structure: Optional[str] = None
     prerequisite_actions: List[str] = field(default_factory=list)
 
+    # ── Drive Affinities ──────────────────────────────────────────
+    # How much this action serves each need type.
+    # Key = NeedType.value (string), Value = affinity [0, 1]
+    # These are SC2-domain knowledge — this is where StarCraft lives.
+    need_affinities: Dict[str, float] = field(default_factory=dict)
+
+    def drive_utility(self, deficits: Dict[str, float]) -> float:
+        """Dot product of deficit vector × affinity vector.
+
+        deficits: mapping from need_type_str → deficit [0, 1]
+        Returns a scalar utility in [0, 1].
+        """
+        if not self.need_affinities or not deficits:
+            return 0.0
+        total = 0.0
+        for need_str, affinity in self.need_affinities.items():
+            deficit = deficits.get(need_str, 0.0)
+            total += deficit * affinity
+        return total
+
     @property
     def score(self) -> float:
-        """Epistemic action score.
+        """Epistemic action score (without drives).
         
         Score = expected_reward * confidence * success_probability
               + information_gain * 0.3
@@ -106,6 +130,9 @@ class AffordanceCandidate:
             "info_gain": round(self.information_gain, 3),
             "confidence": round(self.confidence, 3),
             "score": round(self.score, 3),
+            "need_affinities": {
+                k: round(v, 3) for k, v in self.need_affinities.items()
+            },
         }
 
 
@@ -121,9 +148,16 @@ class WorldState:
     bases: int = 0
     production_buildings: int = 0
 
+    # Spatial resources — distinct mineral patches and gas geysers
+    mineral_fields: List[Dict] = field(default_factory=list)  # [{pos, amount, distance_to_base}]
+    gas_geysers: List[Dict] = field(default_factory=list)    # [{pos, amount, has_refinery, distance_to_base}]
+
     # Military
     army_count: int = 0
     army_value: float = 0.0
+    anti_air_count: int = 0          # units that can target air
+    dual_attack_count: int = 0       # units that hit both air+ground
+    enemy_air_count: int = 0         # visible enemy air units
 
     # Information
     enemy_units_seen: int = 0
@@ -137,24 +171,83 @@ class WorldState:
 
     @classmethod
     def from_botai(cls, bot, tick: int = 0) -> 'WorldState':
-        """Create from BotAI instance."""
-        from sc2.constants import UnitTypeId
-        workers = len(bot.units.of_type(UnitTypeId.SCV))
-        army = bot.units.exclude_type(UnitTypeId.SCV)
-        bases = len(bot.units.of_type(UnitTypeId.COMMANDCENTER))
-        production = (
-            len(bot.units.of_type(UnitTypeId.BARRACKS))
-            + len(bot.units.of_type(UnitTypeId.FACTORY))
-            + len(bot.units.of_type(UnitTypeId.STARPORT))
-        )
+        """Create from BotAI instance — fully race-agnostic."""
+        workers = len(bot.workers)
+        army = len(bot.units)
+        bases = len(bot.townhalls)
+        # Production = structures that aren't townhalls
+        townhall_ids = {s.type_id for s in bot.townhalls}
+        production = sum(1 for s in bot.units.structure if s.type_id not in townhall_ids)
 
-        # Determine game phase
+        # Spatial resources — distinct mineral patches and gas geysers
+        mineral_fields = []
+        for mf in bot.state.mineral_field:
+            mineral_fields.append({
+                "pos": (mf.position.x, mf.position.y),
+                "amount": mf.mineral_contents if hasattr(mf, 'mineral_contents') else 0,
+                "distance_to_base": min(
+                    (mf.position.distance_to(th.position) for th in bot.townhalls),
+                    default=999
+                ) if bot.townhalls else 999,
+            })
+        gas_geysers = []
+        for g in bot.geysers:
+            gas_geysers.append({
+                "pos": (g.position.x, g.position.y),
+                "amount": g.vespene_contents if hasattr(g, 'vespene_contents') else 0,
+                "distance_to_base": min(
+                    (g.position.distance_to(th.position) for th in bot.townhalls),
+                    default=999
+                ) if bot.townhalls else 999,
+            })
+
+        # Game phase from tick
         if tick < 300:
             phase = "early"
         elif tick < 800:
             phase = "mid"
         else:
             phase = "late"
+
+        # ── Army composition (race-agnostic) ──
+        uc = UnitClassifier()
+        worker_ids = {u.tag for u in bot.workers}
+        supply_ids = {u.tag for u in bot.units if any(
+            kw in u.name.upper() for kw in ("OVERLORD", "OVERSEER", "OBSERVER"))}
+        spawned_names = {"LOCUST", "BROODLING", "INTERCEPTOR", "AUTOTURRET"}
+
+        combat_units = []
+        for u in bot.units:
+            if u.tag in worker_ids or u.tag in supply_ids:
+                continue
+            if u.is_structure or not u.can_attack:
+                continue
+            if u.name.upper() in spawned_names:
+                continue
+            info = uc.classify(u)
+            if info and (Role.ARMY in info.roles or Role.SCOUT in info.roles):
+                combat_units.append(u)
+
+        anti_air = 0
+        dual = 0
+        for u in combat_units:
+            info = uc.classify(u)
+            if info:
+                caps = info.attack_caps
+                can_hit_air = AttackCapability.GVA in caps or AttackCapability.AVA in caps
+                can_hit_ground = AttackCapability.GVG in caps or AttackCapability.AVG in caps
+                if can_hit_air:
+                    anti_air += 1
+                if can_hit_air and can_hit_ground:
+                    dual += 1
+
+        # Enemy air units visible
+        enemy_air = 0
+        for eu in bot.known_enemy_units:
+            if not eu.is_structure and eu.type_id.name.upper() not in spawned_names:
+                einfo = uc.classify(eu)
+                if einfo and einfo.movement == Movement.AIR:
+                    enemy_air += 1
 
         return cls(
             minerals=bot.minerals,
@@ -164,12 +257,17 @@ class WorldState:
             workers=workers,
             bases=bases,
             production_buildings=production,
-            army_count=len(army),
-            army_value=sum(u.health + u.shield for u in army),
+            army_count=army,
+            army_value=sum(u.health + u.shield for u in bot.units),
+            anti_air_count=anti_air,
+            dual_attack_count=dual,
+            enemy_air_count=enemy_air,
             enemy_units_seen=len(bot.known_enemy_units),
             enemy_bases_known=len(bot.known_enemy_structures),
             current_tick=tick,
             game_phase=phase,
+            mineral_fields=mineral_fields,
+            gas_geysers=gas_geysers,
         )
 
 
@@ -217,6 +315,7 @@ class AffordanceTracer:
             risk=0.0,
             information_gain=0.0,
             confidence=1.0,
+            # need_affinities provided by DriveAffinityLearner
         ))
 
         # Score and sort
@@ -235,7 +334,7 @@ class AffordanceTracer:
         candidates = []
 
         # Expand
-        if w.bases < 4 and w.minerals >= 400 and w.workers >= 14:
+        if w.bases < 4 and w.minerals >= 300 and w.workers >= 8:
             success = min(0.9, 0.5 + w.workers * 0.02)
             reward = 200.0 if w.bases < 2 else 100.0
             candidates.append(AffordanceCandidate(
@@ -243,11 +342,12 @@ class AffordanceTracer:
                 description=f"Build base #{w.bases + 1}",
                 success_probability=success,
                 expected_reward=reward,
-                resource_cost=400.0,
-                cost_level=CostLevel.HIGH,
+                resource_cost=300.0,
+                cost_level=CostLevel.MEDIUM,
                 risk=0.15,
                 confidence=0.8,
                 requires_unit="SCV",
+                # need_affinities provided by AffordanceModel (learned)
             ))
 
         # Build economy (SCVs)
@@ -262,6 +362,7 @@ class AffordanceTracer:
                 risk=0.0,
                 confidence=0.9,
                 requires_structure="CommandCenter",
+                # need_affinities provided by AffordanceModel (learned)
             ))
 
         # Build supply
@@ -277,26 +378,32 @@ class AffordanceTracer:
                 confidence=0.95,
                 reduces_uncertainty=False,
                 requires_unit="SCV",
+                # need_affinities provided by AffordanceModel (learned)
             ))
 
-        # Tech up
-        if w.production_buildings >= 2 and w.minerals >= 150 and w.vespene >= 100:
+        # Tech up — build structures or research upgrades
+        if w.minerals >= 100 and w.production_buildings >= 1:
             candidates.append(AffordanceCandidate(
                 action_type=SC2ActionType.TECH_UP,
-                description="Advance tech tree",
+                description="Build tech structure or research upgrade",
                 success_probability=0.85,
                 expected_reward=80.0,
-                resource_cost=250.0,
+                resource_cost=150.0,
                 cost_level=CostLevel.MEDIUM,
                 risk=0.05,
                 confidence=0.7,
+                # need_affinities provided by AffordanceModel (learned)
             ))
 
         return candidates
 
     def _military_affordances(self, w: WorldState,
                               entities: Any = None) -> List[AffordanceCandidate]:
-        """Generate military-related affordances."""
+        """Generate military-related affordances.
+
+        Uses army composition data (anti-air, dual-attack, enemy air)
+        to adjust attack success probability and risk.
+        """
         candidates = []
 
         # Build army
@@ -311,18 +418,41 @@ class AffordanceTracer:
                 cost_level=CostLevel.LOW,
                 risk=0.0,
                 confidence=0.85,
+                # need_affinities provided by AffordanceModel (learned)
             ))
 
-        # Attack
-        if w.army_count >= 10:
-            # Estimate attack success based on army size and intelligence
+        # Attack — adjusted by army composition vs enemy air
+        if w.army_count >= 5:
             success = min(0.8, 0.3 + w.army_count * 0.01)
             risk = max(0.1, 0.5 - w.army_count * 0.01)
             info_gain = 0.3 if w.enemy_bases_known == 0 else 0.1
 
+            # Composition adjustment: if enemy has air, we need anti-air
+            if w.enemy_air_count > 0:
+                if w.anti_air_count == 0:
+                    # No anti-air vs enemy air — risky attack
+                    success *= 0.5
+                    risk = min(0.9, risk + 0.3)
+                    info_gain += 0.2  # high info: we're vulnerable
+                elif w.dual_attack_count >= w.enemy_air_count:
+                    # Good anti-air coverage — confident attack
+                    success = min(0.9, success + 0.1)
+                    risk = max(0.05, risk - 0.1)
+                else:
+                    # Partial anti-air — moderate adjustment
+                    success = min(0.85, success + 0.05)
+
+            # No enemy air and we have dual-attack units — bonus
+            if w.enemy_air_count == 0 and w.dual_attack_count > 0:
+                success = min(0.9, success + 0.05)
+
+            desc = f"Attack with {w.army_count} units"
+            if w.enemy_air_count > 0:
+                desc += f" (enemy air: {w.enemy_air_count}, our AA: {w.anti_air_count})"
+
             candidates.append(AffordanceCandidate(
                 action_type=SC2ActionType.ATTACK,
-                description=f"Attack with {w.army_count} units",
+                description=desc,
                 success_probability=success,
                 expected_reward=150.0,
                 resource_cost=0.0,
@@ -331,19 +461,26 @@ class AffordanceTracer:
                 army_exposure=min(1.0, w.army_count / max(1, w.army_count + 10)),
                 information_gain=info_gain,
                 confidence=0.6 if w.uncertainty > 0.5 else 0.8,
+                # need_affinities provided by AffordanceModel (learned)
             ))
 
         # Defend
         if w.army_count >= 3:
+            defend_success = 0.85
+            # If enemy air is near and we lack anti-air, defend is more urgent
+            if w.enemy_air_count > 0 and w.anti_air_count == 0:
+                defend_success = 0.7  # harder to defend without AA
+
             candidates.append(AffordanceCandidate(
                 action_type=SC2ActionType.DEFEND,
                 description="Move army to defensive position",
-                success_probability=0.85,
+                success_probability=defend_success,
                 expected_reward=30.0,
                 resource_cost=0.0,
                 cost_level=CostLevel.FREE,
                 risk=0.05,
                 confidence=0.9,
+                # need_affinities provided by AffordanceModel (learned)
             ))
 
         # Retreat (if army is small and we've seen enemies)
@@ -357,6 +494,7 @@ class AffordanceTracer:
                 cost_level=CostLevel.FREE,
                 risk=0.0,
                 confidence=0.8,
+                # need_affinities provided by AffordanceModel (learned)
             ))
 
         return candidates
@@ -382,6 +520,7 @@ class AffordanceTracer:
             reduces_uncertainty=w.uncertainty > 0.4,
             confidence=0.7,
             requires_unit="SCV",
+            # need_affinities provided by AffordanceModel (learned)
         ))
 
         return candidates

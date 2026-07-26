@@ -46,6 +46,7 @@ class ActionScore:
     prediction_weight: float = 0.5 # from prediction accuracy
     affordance_weight: float = 0.5 # from affordance strength
     uncertainty_penalty: float = 0.0
+    drive_utility: float = 0.0     # from need deficits × affinities
 
     # Final score
     final_score: float = 0.0
@@ -61,6 +62,7 @@ class ActionScore:
             "prediction": round(self.prediction_weight, 3),
             "affordance": round(self.affordance_weight, 3),
             "uncertainty_penalty": round(self.uncertainty_penalty, 3),
+            "drive_utility": round(self.drive_utility, 3),
             "final_score": round(self.final_score, 3),
             "reasoning": self.reasoning,
         }
@@ -134,8 +136,18 @@ class EpistemicActionBridge:
 
     def score_action(self, candidate: Any,
                      entity_confidence: float = 0.5,
-                     prediction_accuracy: Optional[float] = None) -> ActionScore:
-        """Score a single action candidate."""
+                     prediction_accuracy: Optional[float] = None,
+                     drive_utility: float = 0.0) -> ActionScore:
+        """Score a single action candidate.
+
+        Combines:
+          - base reward (from affordance)
+          - entity confidence
+          - prediction accuracy
+          - affordance strength (success probability)
+          - drive utility (deficit × affinity dot product)
+          - uncertainty penalty
+        """
         if prediction_accuracy is None:
             prediction_accuracy = self.prediction_accuracy
 
@@ -151,21 +163,33 @@ class EpistemicActionBridge:
 
         uncertainty_penalty = (1.0 - entity_confidence) * cost_level * 0.1
 
-        # Final score
-        reward_component = base_reward * self.confidence_weight * entity_confidence
-        prediction_component = base_reward * self.prediction_weight * prediction_accuracy
-        affordance_component = base_reward * self.affordance_weight * affordance_strength
+        # ── Combined Score ──
+        # Drive utility is the dominant signal (what the agent NEEDS).
+        # Epistemic components (confidence, prediction, affordance) modulate it.
+        # A high-drive action with low confidence is dampened.
+        # A low-drive action with high confidence gets a small boost.
+
+        epistemic_score = (
+            base_reward * self.confidence_weight * entity_confidence
+            + base_reward * self.prediction_weight * prediction_accuracy
+            + base_reward * self.affordance_weight * affordance_strength
+        )
+
+        # Drive utility is weighted heavily — needs drive behavior
+        # Scale drive_utility to [0, 100] range to match reward scale
+        drive_component = drive_utility * 100.0
 
         final_score = (
-            reward_component
-            + prediction_component
-            + affordance_component
-            - uncertainty_penalty
-            - risk * base_reward * 0.2
+            drive_component * 0.6      # needs drive 60%
+            + epistemic_score * 0.3    # epistemic reasoning 30%
+            - uncertainty_penalty * 10  # penalty for low confidence
+            - risk * base_reward * 0.2  # risk penalty
         )
 
         # Build reasoning
         reasoning_parts = []
+        if drive_utility > 0.5:
+            reasoning_parts.append(f"HIGH DRIVE ({drive_utility:.2f})")
         if entity_confidence < 0.3:
             reasoning_parts.append(f"LOW CONFIDENCE ({entity_confidence:.2f})")
         if prediction_accuracy < 0.4:
@@ -188,6 +212,7 @@ class EpistemicActionBridge:
             prediction_weight=prediction_accuracy,
             affordance_weight=affordance_strength,
             uncertainty_penalty=uncertainty_penalty,
+            drive_utility=drive_utility,
             final_score=final_score,
             reasoning=reasoning,
         )
@@ -197,11 +222,24 @@ class EpistemicActionBridge:
 
     def score_candidates(self, candidates: List[Any],
                          entity_confidence: float = 0.5,
-                         prediction_accuracy: Optional[float] = None) -> List[ActionScore]:
-        """Score all candidate actions and return ranked."""
+                         prediction_accuracy: Optional[float] = None,
+                         deficits: Optional[Dict[str, float]] = None) -> List[ActionScore]:
+        """Score all candidate actions and return ranked.
+
+        deficits: mapping from need_type_str → deficit [0, 1]
+                  Used to compute drive_utility for each candidate.
+        """
         scores = []
         for c in candidates:
-            score = self.score_action(c, entity_confidence, prediction_accuracy)
+            # Compute drive utility from candidate's affinities × deficit vector
+            drive_util = 0.0
+            if deficits and hasattr(c, 'drive_utility'):
+                drive_util = c.drive_utility(deficits)
+
+            score = self.score_action(
+                c, entity_confidence, prediction_accuracy,
+                drive_utility=drive_util,
+            )
             scores.append(score)
 
         scores.sort(key=lambda s: s.final_score, reverse=True)

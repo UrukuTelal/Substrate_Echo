@@ -9,6 +9,13 @@ from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 from sc2.ids.unit_typeid import UnitTypeId
 
+from substrate_echo.embodiments.sc2.unit_classifier import (
+    UnitClassifier, Role, Movement, AttackCapability,
+)
+from substrate_echo.embodiments.sc2.building_upgrade_classifier import (
+    BuildingClassifier, BuildingCategory,
+)
+
 
 # ── Observation Categories ───────────────────────────────────────
 
@@ -132,6 +139,8 @@ class SC2ObservationEncoder:
         self.information = InformationState()
         self._history: List[np.ndarray] = []
         self._state_trace: List[Dict[str, Any]] = []
+        self._unit_classifier = UnitClassifier()
+        self._building_classifier = BuildingClassifier()
 
     def encode(self, game_observation: Any = None) -> np.ndarray:
         """Encode current game state into 16D vector.
@@ -151,8 +160,9 @@ class SC2ObservationEncoder:
     def encode_from_botai(self, bot: Any) -> np.ndarray:
         """Encode using BotAI persistent knowledge (fog-of-war independent).
 
-        This is the preferred encoding path for own-unit counts.
-        BotAI.units maintains all known units regardless of vision.
+        Race-agnostic: uses UnitClassifier + BuildingClassifier to count
+        workers, bases, production buildings, and air/ground composition
+        regardless of which race the bot is playing.
         """
         self.economy.minerals = bot.minerals
         self.economy.vespene = bot.vespene
@@ -160,24 +170,67 @@ class SC2ObservationEncoder:
         self.economy.supply_cap = bot.supply_cap
 
         own_units = bot.units
-        self.economy.workers = len(own_units.of_type(UnitTypeId.SCV))
-        self.economy.bases = len(own_units.of_type(UnitTypeId.COMMANDCENTER))
-        self.economy.production_buildings = (
-            len(own_units.of_type(UnitTypeId.BARRACKS))
-            + len(own_units.of_type(UnitTypeId.FACTORY))
-            + len(own_units.of_type(UnitTypeId.STARPORT))
-        )
-        self.economy.army_value = sum(
-            u.health + u.shield for u in own_units
-            if u.type_id not in self.ARMY_EXCLUDE
-        )
+        own_structures = bot.units.structure
 
-        self.military.army_count = len(
-            own_units.exclude_type(UnitTypeId.SCV)
-        )
-        self.military.threat_level = min(1.0, self.military.army_count / 50)
+        # ── Workers (race-agnostic) ──
+        worker_count = len(self._unit_classifier.filter_by_role(own_units, Role.ECONOMY))
+        self.economy.workers = worker_count
 
-        # Information from game state
+        # ── Bases (race-agnostic via BuildingClassifier) ──
+        base_count = 0
+        for s in own_structures:
+            info = self._building_classifier.classify(s)
+            if info and info.category == BuildingCategory.PRODUCTION and info.name in (
+                "Hatchery", "Lair", "Hive",
+                "CommandCenter", "OrbitalCommand", "PlanetaryFortress",
+                "Nexus",
+            ):
+                base_count += 1
+        self.economy.bases = base_count
+
+        # ── Production buildings (race-agnostic) ──
+        prod_count = 0
+        for s in own_structures:
+            info = self._building_classifier.classify(s)
+            if info and info.category == BuildingCategory.PRODUCTION and info.name not in (
+                "Hatchery", "Lair", "Hive",
+                "CommandCenter", "OrbitalCommand", "PlanetaryFortress",
+                "Nexus",
+            ):
+                prod_count += 1
+        self.economy.production_buildings = prod_count
+
+        # ── Army value (exclude workers, supply units, bases) ──
+        army_value = 0.0
+        for u in own_units:
+            info = self._unit_classifier.classify(u)
+            if info and Role.ARMY in info.roles:
+                army_value += u.health + u.shield
+            elif info and Role.SUPPORT in info.roles and Role.ECONOMY not in info.roles:
+                army_value += u.health + u.shield
+        self.economy.army_value = army_value
+
+        # ── Military composition (race-agnostic) ──
+        army_units = [u for u in own_units
+                      if not u.is_structure
+                      and u.can_attack]
+        # Exclude workers and supply units from army count
+        combat_units = []
+        for u in army_units:
+            info = self._unit_classifier.classify(u)
+            if info and (Role.ARMY in info.roles or Role.SCOUT in info.roles):
+                combat_units.append(u)
+
+        self.military.army_count = len(combat_units)
+        self.military.threat_level = min(1.0, len(combat_units) / 50)
+
+        # ── Air / Ground / Anti-air breakdown ──
+        air_units = self._unit_classifier.filter_by_movement(combat_units, Movement.AIR)
+        ground_units = self._unit_classifier.filter_by_movement(combat_units, Movement.GROUND)
+        self.military.air_count = len(air_units)
+        self.military.ground_count = len(ground_units)
+
+        # ── Information from game state ──
         self.information.uncertainty = max(
             0.0, 1.0 - self.information.enemy_known_ratio
         )

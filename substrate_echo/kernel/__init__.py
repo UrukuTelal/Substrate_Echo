@@ -232,40 +232,35 @@ class SubstrateKernel:
         self._hypothesis_interval = 20
         self._prediction_interval = 10
         self._rule_check_interval = 50
+        
+        # Throttle intervals for expensive per-tick operations
+        self._feature_interval = 5       # feature extraction + obs memory
+        self._dev_record_interval = 10   # development record
+        self._verify_interval = 5        # prediction verification
+        self._metrics_interval = 10      # topology metrics + abstraction summary
+        
+        # Cached metrics (computed every _metrics_interval ticks)
+        self._cached_topo = self.topology.compute_metrics()
+        self._cached_abs_summary = self.abstraction.summary()
+        self._cached_coherence = 0.0
 
     # ── Cognitive Plane ──────────────────────────────────────────
 
     def publish_observation(self, obs: Observation) -> CognitiveState:
-        """Main cognitive entry point. One call = one tick."""
+        """Main cognitive entry point. One call = one tick.
+        
+        Throttled: heavy epistemology operations run every N ticks,
+        lightweight state updates run every tick.
+        """
         state = obs.to_array()
 
-        # Track embodiment
+        # Track embodiment (lightweight, every tick)
         if obs.embodiment_id not in self._embodiments:
             self._embodiments[obs.embodiment_id] = EmbodimentState(
                 embodiment_id=obs.embodiment_id)
         self._embodiments[obs.embodiment_id].is_active = True
-        
-        # Epistemology: Feature extraction
-        from ..epistemology.observation import RawObservation
-        raw = RawObservation(
-            data={"vector_" + str(i): v for i, v in enumerate(state)},
-            modality=obs.modality,
-            source=obs.embodiment_id,
-            timestamp=obs.timestamp,
-            metadata=obs.metadata,
-        )
-        features = self.feature_extractor.extract(raw)
-        self.observation_memory.record(features)
-        self._last_features = features
-        
-        # Record observation in development record
-        self.development_record.record_observation(
-            self._tick,
-            f"Observation from {obs.embodiment_id}",
-            details=features.to_dict(),
-        )
 
-        # Learn dynamics
+        # Learn dynamics (append is lightweight; fit is throttled)
         if self._prev_state is not None:
             velocity = state - self._prev_state
             self.dm._states.append(self._prev_state.copy())
@@ -274,39 +269,66 @@ class SubstrateKernel:
                 if len(self.dm._states) % 50 == 0:
                     self.dm._fit_dynamics()
 
-        # Convergence detection
+        # Convergence endpoints (lightweight append)
         self._convergence_endpoints.append(state.copy())
         if len(self._convergence_endpoints) > self.config.convergence_window:
             self._convergence_endpoints.pop(0)
+
+        # ── Throttled expensive operations ──────────────────────
+
+        # Feature extraction + observation memory (every N ticks)
+        if self._tick % self._feature_interval == 0:
+            from ..epistemology.observation import RawObservation
+            raw = RawObservation(
+                data={"vector_" + str(i): v for i, v in enumerate(state)},
+                modality=obs.modality,
+                source=obs.embodiment_id,
+                timestamp=obs.timestamp,
+                metadata=obs.metadata,
+            )
+            features = self.feature_extractor.extract(raw)
+            self.observation_memory.record(features)
+            self._last_features = features
+
+        # Development record (every N ticks)
+        if self._tick % self._dev_record_interval == 0 and self._last_features:
+            self.development_record.record_observation(
+                self._tick,
+                f"Observation from {obs.embodiment_id}",
+                details=self._last_features.to_dict(),
+            )
+
+        # Convergence detection (every 100 ticks)
         if self._tick % 100 == 0 and self._tick > 200:
             self._detect_convergence()
 
-        # Abstraction
+        # Abstraction update (every 10 ticks)
         if self._tick % 10 == 0 and self._base_attractors:
             self.abstraction.update(self._tick, state, self._base_attractors)
         if self._tick % 500 == 0 and self._tick > 500 and self._base_attractors:
             self.abstraction.check_abstraction(self._tick, self._base_attractors)
 
-        # Topology
+        # Topology snapshot (every topology_interval)
         if self._tick % self.config.topology_interval == 0 and self._tick > 0:
             self.topology.record_snapshot(self._tick)
-        
-        # Epistemology: Generate hypotheses periodically
+
+        # Hypothesis generation (every N ticks)
         if self._tick % self._hypothesis_interval == 0 and self._tick > 20:
             self._generate_hypotheses()
-        
-        # Epistemology: Generate predictions periodically
+
+        # Prediction generation (every N ticks)
         if self._tick % self._prediction_interval == 0 and self._tick > 10:
             self._generate_predictions()
-        
-        # Epistemology: Verify predictions against current state
-        self._verify_predictions(state)
-        
-        # Epistemology: Discover rules periodically
+
+        # Prediction verification (throttled)
+        if self._tick % self._verify_interval == 0:
+            self._verify_predictions(state)
+
+        # Rule discovery (every N ticks)
         if self._tick % self._rule_check_interval == 0 and self._tick > 50:
             self.rule_engine.discover_rules()
-        
-        # Epistemology: Council audit periodically
+
+        # Council audit (every 100 ticks)
         if self._tick % 100 == 0 and self._tick > 100:
             self.epistemology_council.audit(
                 self.hypothesis_space,
@@ -314,26 +336,31 @@ class SubstrateKernel:
                 self.rule_engine,
             )
 
-        # Apply pending rewards
+        # Apply pending rewards (lightweight)
         self._apply_rewards()
 
-        # Executive function: manage goals, attention, priorities
+        # Executive function (lightweight)
         exec_state = self.executive.tick(obs, current_tick=self._tick)
 
-        # Generate action + prediction (influenced by executive attention)
+        # Generate action + prediction (lightweight)
         action = self._generate_action(state)
         prediction = self._generate_prediction(state)
 
-        # Build response
-        topo = self.topology.compute_metrics()
-        abs_summary = self.abstraction.summary()
+        # Build response — use cached metrics when available
+        if self._tick % self._metrics_interval == 0:
+            self._cached_topo = self.topology.compute_metrics()
+            self._cached_abs_summary = self.abstraction.summary()
+            self._cached_coherence = self._compute_coherence()
+        topo = getattr(self, '_cached_topo', self.topology.compute_metrics())
+        abs_summary = getattr(self, '_cached_abs_summary', self.abstraction.summary())
+        coherence = getattr(self, '_cached_coherence', self._compute_coherence())
 
-        # Council: periodic audits and health checks
+        # Council tick (lightweight)
         substrate_state = {
             "tick": self._tick,
             "n_attractors": len(self._base_attractors),
             "n_meta_attractors": abs_summary["n_meta"],
-            "coherence": self._compute_coherence(),
+            "coherence": coherence,
             "volume_entropy": topo.volume_entropy,
             "basin_balance": topo.basin_balance,
             "n_goals": exec_state.n_active,
@@ -347,7 +374,7 @@ class SubstrateKernel:
             prediction=prediction,
             n_attractors=len(self._base_attractors),
             n_meta_attractors=abs_summary["n_meta"],
-            coherence=self._compute_coherence(),
+            coherence=coherence,
             basin_balance=topo.basin_balance,
             mean_depth=topo.mean_depth,
             volume_entropy=topo.volume_entropy,
