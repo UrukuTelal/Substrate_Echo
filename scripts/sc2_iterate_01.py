@@ -479,14 +479,14 @@ class IterateBot(BotAI):
         if workers != self._prev_workers:
             self.causal_graph.record_event(
                 EventType.RESOURCE_CHANGED, self._step, "economy", "Economy",
-                f"Workers: {self._prev_workers} → {workers}",
+                f"Workers: {self._prev_workers} -> {workers}",
                 0.8, {"from": self._prev_workers, "to": workers})
 
         if bases != self._prev_bases:
             self.causal_graph.record_event(
                 EventType.EXPANSION_STARTED if bases > self._prev_bases else EventType.STRUCTURE_DESTROYED,
                 self._step, "bases", "Bases",
-                f"Bases: {self._prev_bases} → {bases}",
+                f"Bases: {self._prev_bases} -> {bases}",
                 1.0, {"from": self._prev_bases, "to": bases})
 
         self._prev_army = army
@@ -1300,7 +1300,8 @@ class IterateBot(BotAI):
             "tactical_brain": {
                 "battles_recorded": len(self.tactical_brain._battle_log),
                 "hypotheses_generated": len(self.tactical_brain._hypotheses),
-                "hypotheses_validated": len([h for h in self.tactical_brain._hypotheses.values() if h.validated]),
+                "hypotheses_validated": len([h for h in self.tactical_brain._hypotheses.values()
+                                            if h.status.name == "VALIDATED"]),
                 "hypotheses_active": len([h for h in self.tactical_brain._hypotheses.values()
                                           if h.status.name == "ACTIVE"]),
                 "experiments_run": len(self.tactical_brain._experiments),

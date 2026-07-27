@@ -258,7 +258,7 @@ class CausalGraph:
         """Convenience: record an army engagement."""
         return self.record_event(
             EventType.ARMY_ENGAGED, tick, attacker_id, "engagement",
-            f"Engagement: {attacker_id} → {defender_id}",
+            f"Engagement: {attacker_id} -> {defender_id}",
             0.8, {"defender": defender_id, "damage": damage},
         )
 

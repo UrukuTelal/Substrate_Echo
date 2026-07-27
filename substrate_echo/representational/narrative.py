@@ -355,7 +355,7 @@ class NarrativeLayer:
         if peak:
             parts.append(f"peak: {peak.description}")
         if narrative.outcome:
-            parts.append(f"→ {narrative.outcome}")
+            parts.append(f"-> {narrative.outcome}")
         return " | ".join(parts)
 
     # ── Query ────────────────────────────────────────────────────
