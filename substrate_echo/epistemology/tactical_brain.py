@@ -587,6 +587,9 @@ class TacticalBrain:
         if len(self._battle_log) > self._max_battle_log:
             self._battle_log.pop(0)
 
+        our_comp = {s.name: 1 for s in prev.own_units if s.is_alive and s.can_attack}
+        self._update_hypotheses_from_battle(our_comp, enemy_comp, won, tick)
+
         return battle
 
     def record_battle_outcome(self, my_comp: Dict[str, int],
@@ -707,18 +710,18 @@ class TacticalBrain:
         if not unit_totals:
             return None
 
-        # Pick the unit with best win rate (min 2 battles)
+        # Pick the unit with best win rate (min 1 battle to start learning)
         best_unit = None
         best_winrate = 0.0
         for unit, wins in unit_wins.items():
             total = unit_totals[unit]
-            if total >= 2:
+            if total >= 1:
                 wr = wins / total
                 if wr > best_winrate:
                     best_winrate = wr
                     best_unit = unit
 
-        if not best_unit or best_winrate < 0.5:
+        if not best_unit or best_winrate < 0.4:
             return None
 
         # Create hypothesis
@@ -757,12 +760,12 @@ class TacticalBrain:
                     best_conf = hyp.confidence
                     best_hyp = hyp
 
-        if best_hyp and best_conf >= 0.5:
+        if best_hyp and best_conf >= 0.4:
             return best_hyp.counter_unit
 
         # No existing hypothesis: generate one from battle history
         new_hyp = self.generate_hypothesis(enemy_comp, tick)
-        if new_hyp and new_hyp.confidence >= 0.5:
+        if new_hyp and new_hyp.confidence >= 0.4:
             return new_hyp.counter_unit
 
         return None

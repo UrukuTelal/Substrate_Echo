@@ -159,6 +159,11 @@ class IterateBot(BotAI):
         self.frame_system = FrameSystem(self.state_graph, self.causal_graph)
         self.narrative_layer = NarrativeLayer(self.causal_graph)
         self._last_representational_tick = 0
+        # Metrics tracking for representational layer and kernel
+        self._frame_queries_executed = 0
+        self._interpreter_entities_processed = 0
+        self._kernel_coherence_values: List[float] = []
+        self._kernel_volume_entropy_values: List[float] = []
 
     def on_start(self):
         self._start_time = time.time()
@@ -224,17 +229,23 @@ class IterateBot(BotAI):
                       "visibility_advantage": self.encoder.information.visibility_advantage},
         )
         cognitive_state = self.kernel.publish_observation(kernel_obs)
+        self._kernel_coherence_values.append(cognitive_state.coherence)
+        self._kernel_volume_entropy_values.append(cognitive_state.volume_entropy)
 
         # ── Representational Layer tick ──
         if self._step % 3 == 0:  # every 3 ticks to avoid overhead
             # Interpret game state into EntityDescriptors
+            prev_entity_count = len(self.state_graph._entities)
             self.interpreter.interpret_tick(self, self._step)
+            self._interpreter_entities_processed += len(self.state_graph._entities) - prev_entity_count
 
             # Record significant events in causal graph
             self._record_causal_events(workers, army, bases)
 
             # Update frame system and narrative layer
             self.frame_system.set_perspective(self._select_perspective())
+            # Frame queries are not yet wired (H14 pending) — count perspective updates
+            self._frame_queries_executed += 1
             self.narrative_layer.process_tick(self._step)
 
         # Entity model (every tick lightweight, evidence every 50)
@@ -328,13 +339,19 @@ class IterateBot(BotAI):
             total_engaged = len(self._last_attack_units) + len(self._last_attack_enemies)
             if total_engaged > 0 and self._tactical_state:
                 outcome = "won" if enemy_killed > our_killed else "lost"
+                our_comp = {}
+                for tag in self._last_attack_units:
+                    name = self._last_attack_units[tag]
+                    our_comp[name] = our_comp.get(name, 0) + 1
+                enemy_comp = {}
+                for tag in self._last_attack_enemies:
+                    name = self._last_attack_enemies[tag]
+                    enemy_comp[name] = enemy_comp.get(name, 0) + 1
                 self.tactical_brain.record_battle_outcome(
-                    step=self._step,
-                    our_composition=self._last_attack_units,
-                    enemy_composition=self._last_attack_enemies,
-                    our_killed=our_killed,
-                    enemy_killed=enemy_killed,
-                    outcome=outcome,
+                    my_comp=our_comp,
+                    enemy_comp=enemy_comp,
+                    won=(outcome == "won"),
+                    tick=self._step,
                 )
 
                 # Record hypothesis outcome in epistemic ledger
@@ -1284,13 +1301,49 @@ class IterateBot(BotAI):
                 "battles_recorded": len(self.tactical_brain._battle_log),
                 "hypotheses_generated": len(self.tactical_brain._hypotheses),
                 "hypotheses_validated": len([h for h in self.tactical_brain._hypotheses.values() if h.validated]),
+                "hypotheses_active": len([h for h in self.tactical_brain._hypotheses.values()
+                                          if h.status.name == "ACTIVE"]),
                 "experiments_run": len(self.tactical_brain._experiments),
                 "active_experiment": {
                     "unit_type": self.tactical_brain.get_active_experiment().unit_type,
                     "outcome": self.tactical_brain.get_active_experiment().outcome,
                 } if self.tactical_brain.get_active_experiment() else None,
+                "hypothesis_details": [
+                    {"id": h.id, "counter": h.counter_unit,
+                     "targets": h.targets_enemy, "confidence": round(h.confidence, 3),
+                     "wins": h.wins, "losses": h.losses, "status": h.status.name}
+                    for h in self.tactical_brain._hypotheses.values()
+                ],
             },
             "audit": audit_report.to_dict(),
+            "kernel": {
+                "avg_coherence": round(sum(self._kernel_coherence_values) / max(1, len(self._kernel_coherence_values)), 4),
+                "coherence_variance": round(
+                    sum((c - sum(self._kernel_coherence_values) / max(1, len(self._kernel_coherence_values))) ** 2
+                        for c in self._kernel_coherence_values) / max(1, len(self._kernel_coherence_values)), 6
+                ) if self._kernel_coherence_values else 0.0,
+                "avg_volume_entropy": round(sum(self._kernel_volume_entropy_values) / max(1, len(self._kernel_volume_entropy_values)), 4),
+                "n_attractors": len(self.kernel._base_attractors),
+                "cognitive_energy": self.kernel._cognitive_energy,
+                "ticks_processed": self.kernel._tick,
+            },
+            "representational": {
+                "state_graph": {
+                    "entities": len(self.state_graph._entities),
+                    "edges": len(self.state_graph._edges),
+                },
+                "causal_graph": {
+                    "events": len(self.causal_graph._events),
+                    "consequences": len(self.causal_graph._consequences),
+                },
+                "narrative_layer": {
+                    "active": len(self.narrative_layer._active),
+                    "completed": len(self.narrative_layer._completed),
+                },
+                "frame_queries_executed": self._frame_queries_executed,
+                "interpreter_entities_processed": self._interpreter_entities_processed,
+                "ontology_concepts": len(self.ontology.concepts),
+            },
         }
 
         with open(LOG_PATH, "a") as f:

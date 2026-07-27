@@ -329,7 +329,7 @@ class SemanticInterpreter:
     def _interpret_unit(self, unit: Any, is_own: bool, bot: Any) -> None:
         """Create or update EntityDescriptor for a unit."""
         tag = unit.tag
-        unit_name = unit.name if hasattr(unit, 'name') else str(unit.unit_type)
+        unit_name = unit.name if hasattr(unit, 'name') else str(unit.type_id)
         controller = "self" if is_own else "enemy"
 
         # Build identity
@@ -337,7 +337,7 @@ class SemanticInterpreter:
         identity = EntityIdentity(
             id=eid,
             name=unit_name,
-            aliases=[str(unit.unit_type)],
+            aliases=[str(unit.type_id)],
         )
 
         # Look up knowledge
@@ -384,7 +384,7 @@ class SemanticInterpreter:
             source="sc2_api",
             observation="visible_unit",
             confidence=1.0,
-            data={"tag": tag, "is_own": is_own, "type_id": unit.unit_type},
+            data={"tag": tag, "is_own": is_own, "type_id": str(unit.type_id)},
         )
 
         # Create or update descriptor
@@ -426,7 +426,7 @@ class SemanticInterpreter:
     def _interpret_structure(self, structure: Any, is_own: bool, bot: Any) -> None:
         """Create or update EntityDescriptor for a structure."""
         tag = structure.tag
-        struct_name = structure.name if hasattr(structure, 'name') else str(structure.unit_type)
+        struct_name = structure.name if hasattr(structure, 'name') else str(structure.type_id)
         controller = "self" if is_own else "enemy"
 
         eid = f"{'own' if is_own else 'enemy'}_{struct_name}_{tag}"
@@ -453,7 +453,7 @@ class SemanticInterpreter:
             source="sc2_api",
             observation="visible_structure",
             confidence=1.0,
-            data={"tag": tag, "is_own": is_own, "type_id": structure.unit_type},
+            data={"tag": tag, "is_own": is_own, "type_id": str(structure.type_id)},
         )
 
         existing = self.graph.get_entity(eid)
@@ -463,7 +463,7 @@ class SemanticInterpreter:
             existing.history.updated_tick = self._tick
         else:
             descriptor = EntityDescriptor(
-                identity=EntityIdentity(id=eid, name=struct_name, aliases=[str(structure.unit_type)]),
+                identity=EntityIdentity(id=eid, name=struct_name, aliases=[str(structure.type_id)]),
                 embodiment=EntityEmbodiment(
                     environment="StarCraft II",
                     controller=controller,

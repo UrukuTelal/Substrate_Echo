@@ -98,7 +98,7 @@ class SC2ActionDecoder:
     def _decode_expand(self, abstract: AbstractAction) -> List[ConcreteAction]:
         """Build a new command center."""
         workers = [tag for tag, unit in self._unit_cache.items()
-                   if unit.unit_type == 45 and unit.is_idle][:4]
+                   if unit.type_id == 45 and unit.is_idle][:4]
 
         actions = []
         if abstract.target:
@@ -115,7 +115,7 @@ class SC2ActionDecoder:
         """Build military units."""
         actions = []
         for tag, unit in self._unit_cache.items():
-            if unit.unit_type in [21, 22, 23] and unit.is_idle:  # Production buildings
+            if unit.type_id in [21, 22, 23] and unit.is_idle:  # Production buildings
                 actions.append(ConcreteAction(
                     action_type=ActionType.BUILD_ARMY,
                     unit_tag=tag,
@@ -129,7 +129,7 @@ class SC2ActionDecoder:
     def _decode_defend(self, abstract: AbstractAction) -> List[ConcreteAction]:
         """Move army to defensive position."""
         army = [tag for tag, unit in self._unit_cache.items()
-                if unit.unit_type not in [45, 86, 130, 131]][:10]
+                if unit.type_id not in [45, 86, 130, 131]][:10]
 
         if army and abstract.target:
             return [ConcreteAction(
@@ -144,7 +144,7 @@ class SC2ActionDecoder:
     def _decode_attack(self, abstract: AbstractAction) -> List[ConcreteAction]:
         """Move army to attack position."""
         army = [tag for tag, unit in self._unit_cache.items()
-                if unit.unit_type not in [45, 86, 130, 131]][:15]
+                if unit.type_id not in [45, 86, 130, 131]][:15]
 
         if army and abstract.target:
             return [ConcreteAction(
@@ -159,7 +159,7 @@ class SC2ActionDecoder:
     def _decode_scout(self, abstract: AbstractAction) -> List[ConcreteAction]:
         """Send a unit to scout."""
         workers = [tag for tag, unit in self._unit_cache.items()
-                   if unit.unit_type == 45 and unit.is_idle][:1]
+                   if unit.type_id == 45 and unit.is_idle][:1]
 
         if workers and abstract.target:
             return [ConcreteAction(
@@ -174,7 +174,7 @@ class SC2ActionDecoder:
     def _decode_harass(self, abstract: AbstractAction) -> List[ConcreteAction]:
         """Send a small group to harass."""
         army = [tag for tag, unit in self._unit_cache.items()
-                if unit.unit_type not in [45, 86, 130, 131]][:5]
+                if unit.type_id not in [45, 86, 130, 131]][:5]
 
         if army and abstract.target:
             return [ConcreteAction(
@@ -190,7 +190,7 @@ class SC2ActionDecoder:
         """Research upgrades."""
         actions = []
         for tag, unit in self._unit_cache.items():
-            if unit.unit_type in [21, 22, 23, 39, 62]:  # Production/upgrade buildings
+            if unit.type_id in [21, 22, 23, 39, 62]:  # Production/upgrade buildings
                 actions.append(ConcreteAction(
                     action_type=ActionType.TECH_UP,
                     unit_tag=tag,
@@ -203,7 +203,7 @@ class SC2ActionDecoder:
     def _decode_explore(self, abstract: AbstractAction) -> List[ConcreteAction]:
         """Explore unknown areas."""
         workers = [tag for tag, unit in self._unit_cache.items()
-                   if unit.unit_type == 45 and unit.is_idle][:1]
+                   if unit.type_id == 45 and unit.is_idle][:1]
 
         if workers and abstract.target:
             return [ConcreteAction(
@@ -218,7 +218,7 @@ class SC2ActionDecoder:
     def _decode_retreat(self, abstract: AbstractAction) -> List[ConcreteAction]:
         """Retreat army to safety."""
         army = [tag for tag, unit in self._unit_cache.items()
-                if unit.unit_type not in [45, 86, 130, 131]][:10]
+                if unit.type_id not in [45, 86, 130, 131]][:10]
 
         if army and abstract.target:
             return [ConcreteAction(
@@ -233,7 +233,7 @@ class SC2ActionDecoder:
     def _decode_hold(self, abstract: AbstractAction) -> List[ConcreteAction]:
         """Hold current position."""
         army = [tag for tag, unit in self._unit_cache.items()
-                if unit.unit_type not in [45, 86, 130, 131]][:10]
+                if unit.type_id not in [45, 86, 130, 131]][:10]
 
         if army:
             return [ConcreteAction(
