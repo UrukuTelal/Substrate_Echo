@@ -67,6 +67,15 @@ REPRESENTATIONAL_PATH = str(Path(__file__).parent.parent / "data" / "representat
 class IterateBot(BotAI):
     """SC2 bot for iteration runs. Same architecture as LiveBot."""
 
+    # Race-agnostic name sets — used for unit filtering across all methods
+    SUPPLY_NAMES = {"OVERLORD", "OVERSEER", "OBSERVER", "MEDIVAC", "WARP_PRISM", "COLossus"}
+    SPAWNED_NAMES = {"LOCUST", "BROODLING", "INTERCEPTOR", "AUTOTURRET", "LARVA", "EGG", "COCOON"}
+    WORKER_KEYWORDS = ("DRONE", "SCV", "PROBE")
+    SUPPLY_KEYWORDS = ("SUPPLY", "OVERLORD", "PYLON", "DEPOT")
+    TOWNHALL_KEYWORDS = ("COMMANDCENTER", "NEXUS", "HATCHERY", "LAIR", "HIVE", "ORBITALCOMMAND", "PLANETARYFORTRESS")
+    GAS_KEYWORDS = ("EXTRACTOR", "ASSIMILATOR", "REFINERY")
+    GAS_BUILD_KEYWORDS = ("EXTRACTOR", "ASSIMILATOR", "REFINERY", "ZERGBUILD", "PROTOSSBUILD", "TERRANBUILD")
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__()
         self.config = config
@@ -121,8 +130,8 @@ class IterateBot(BotAI):
         self._prev_observation = None
         self._prev_deficits = None
         self._prev_action = None
-        self._spawned_names = {"LOCUST", "BROODLING", "INTERCEPTOR", "AUTOTURRET"}
-        self._supply_names = {"OVERLORD", "OVERSEER", "OBSERVER"}
+        self._spawned_names = self.SPAWNED_NAMES
+        self._supply_names = self.SUPPLY_NAMES
         self._cached_caps = []
         self._caps_unit_count = 0
         self._caps_refresh_tick = 0
@@ -131,8 +140,6 @@ class IterateBot(BotAI):
         self._prev_worker_count = 0
         self._income_history: List[float] = []  # minerals per worker per tick
         self._diminishing_returns = False
-        # Zerg-specific tracking
-        self._drone_to_geyser: Dict[int, Point2] = {}  # drone tag -> geyser position
         # Track larvae that are currently morphing (tag -> step commanded)
         self._morphing_larvae: Dict[int, int] = {}
         # Action delay timer (learnable by AI) - prevents action spam
@@ -167,7 +174,7 @@ class IterateBot(BotAI):
 
     def on_start(self):
         self._start_time = time.time()
-        self._race = Race.Zerg  # Force Zerg for testing
+        self._race = self.config.get("race", "Zerg")
         self._my_player_id = self.state.common.player_id
         self.ledger.begin_game(self.config.get("game_number", 0))
 
@@ -409,9 +416,7 @@ class IterateBot(BotAI):
             for u in self.workers:
                 try:
                     if u.orders and any(
-                        "EXTRACTOR" in str(o.ability) or
-                        "ASSIMILATOR" in str(o.ability) or
-                        "REFINERY" in str(o.ability)
+                        any(kw in str(o.ability) for kw in self.GAS_KEYWORDS)
                         for o in u.orders):
                         gas_workers += 1
                 except (KeyError, Exception):
@@ -422,9 +427,7 @@ class IterateBot(BotAI):
             for u in self.workers:
                 try:
                     if u.orders and any(
-                        "EXTRACTOR" in str(o.ability) or
-                        "ASSIMILATOR" in str(o.ability) or
-                        "REFINERY" in str(o.ability)
+                        any(kw in str(o.ability) for kw in self.GAS_KEYWORDS)
                         for o in u.orders):
                         gas_workers += 1
                 except (KeyError, Exception):
@@ -435,7 +438,10 @@ class IterateBot(BotAI):
         optimal_gas_workers = bases * 6
 
         minerals = min(1.0, mineral_workers / max(1, optimal_mineral_workers))
-        gas = min(1.0, gas_workers / max(1, optimal_gas_workers))
+        # Gas satisfaction = min of (worker allocation, actual reserves)
+        gas_worker_ratio = gas_workers / max(1, optimal_gas_workers)
+        gas_reserve_ratio = min(1.0, self.vespene / max(1, bases * 150))  # 150 gas per base is healthy
+        gas = min(gas_worker_ratio, gas_reserve_ratio)
         supply = (self.supply_cap - self.supply_used) / max(1, self.supply_cap) if self.supply_cap > 0 else 0.5
         mil = min(1.0, army / 20.0)
         enemy_count = len(self.known_enemy_units)
@@ -630,7 +636,7 @@ class IterateBot(BotAI):
         self._caps_unit_count = current_count
         self._caps_refresh_tick = self._step
         caps = []
-        skip_names = {"LARVA", "EGG", "COCOON", "LOCUST", "BROODLING"}
+        skip_names = {"LOCUST", "BROODLING"}
         for unit in self.units:
             if unit.name.upper() in skip_names:
                 continue
@@ -669,25 +675,25 @@ class IterateBot(BotAI):
 
         # Engagement override: if army is strong enough, attack periodically
         worker_ids = {u.tag for u in self.workers}
-        supply_ids = {u.tag for u in self.units if any(kw in u.name.upper() for kw in ("OVERLORD", "OVERSEER", "OBSERVER"))}
-        spawned_names = {"LOCUST", "BROODLING", "INTERCEPTOR", "AUTOTURRET"}
+        supply_ids = {u.tag for u in self.units if any(kw in u.name.upper() for kw in self.SUPPLY_NAMES)}
+        spawned = self.SPAWNED_NAMES
         army_units = []
         for u in self.units:
             if u.tag in worker_ids or u.tag in supply_ids:
                 continue
             if u.is_structure or not u.can_attack:
                 continue
-            if u.name.upper() in spawned_names:
+            if u.name.upper() in spawned:
                 continue
             info = self._unit_classifier.classify(u)
             if info and (Role.ARMY in info.roles or Role.SCOUT in info.roles):
                 army_units.append(u)
         
         # Defensive attack: if enemy units visible near our base, attack regardless of army size
-        # Filter out spawned units (locusts, broodlings, interceptors)
+        # Filter out spawned units
         enemy_nearby = any(
             eu.position.distance_to(self.townhalls.first.position) < 40
-            and eu.type_id.name not in ("LOCUST", "BROODLING", "INTERCEPTOR", "AUTOTURRET")
+            and eu.type_id.name.upper() not in self.SPAWNED_NAMES
             for eu in self.known_enemy_units
         ) if self.townhalls else False
 
@@ -701,7 +707,9 @@ class IterateBot(BotAI):
         elif enemy_nearby and army_units:
             action_type = "attack"
 
-        if action_type in ("build_economy", "build_army"):
+        if action_type == "build_army":
+            await self._exec_train(caps, force_army=True)
+        elif action_type == "build_economy":
             await self._exec_train(caps)
         elif action_type in ("attack", "defensive_attack"):
             await self._exec_attack(caps)
@@ -718,7 +726,7 @@ class IterateBot(BotAI):
 
         self._actions_log.append({"step": self._step, "type": action_type})
 
-    async def _exec_train(self, caps):
+    async def _exec_train(self, caps, force_army=False):
         """Discover and use production/building capabilities.
 
         All decisions based on discovered abilities, not hardcoded types.
@@ -734,11 +742,11 @@ class IterateBot(BotAI):
             if workers_now > 0:
                 income_per_worker = mineral_delta / workers_now
                 self._income_history.append(income_per_worker)
-                # Keep last 224 observations (~10 seconds of game time at 22.4 TPS)
-                if len(self._income_history) > 5000:
+                # Keep last 500 observations (~20 seconds of game time)
+                if len(self._income_history) > 500:
                     self._income_history.pop(0)
                 # Detect diminishing returns over a ~5-second smoothing window
-                if len(self._income_history) >= 5000:
+                if len(self._income_history) >= 200:
                     recent = sum(self._income_history[-112:]) / 112
                     earlier = sum(self._income_history[-224:-112]) / 112
                     if earlier > 0 and recent < earlier * 0.7:
@@ -752,8 +760,9 @@ class IterateBot(BotAI):
         if len(self.workers) < 10:
             self._diminishing_returns = False
 
-        # If diminishing returns, train army instead of workers
-        if self._diminishing_returns and self.workers:
+        # If action is build_army OR diminishing returns, train army instead of workers
+        build_army_now = force_army or self._diminishing_returns
+        if build_army_now and self.workers:
             # Counter-unit override: if tactical brain suggests a specific unit, try it first
             suggested_type = None
             if self._tactical_state and self._tactical_state.enemy.unit_counts:
@@ -774,15 +783,28 @@ class IterateBot(BotAI):
                                 await self.do(unit(ability))
                                 return
 
+            # Search ALL capabilities for the best army unit to train
+            army_candidates = []
             for unit, ability in caps:
                 if ability == skip:
                     continue
                 aname = ability.name
                 if "TRAIN" in aname or "MORPH" in aname:
-                    if not any(kw in aname for kw in ("DRONE", "SCV", "PROBE")):
-                        if unit.is_idle and self.can_afford(ability):
-                            await self.do(unit(ability))
-                            return
+                    # Exclude workers AND supply units
+                    if not any(kw in aname for kw in self.WORKER_KEYWORDS):
+                        if not any(kw in aname for kw in self.SUPPLY_KEYWORDS):
+                            if unit.is_idle and self.can_afford(ability):
+                                army_candidates.append((unit, ability, aname))
+            
+            # Train the first viable army unit
+            if army_candidates:
+                unit, ability, aname = army_candidates[0]
+                print(f"[DEBUG build_army] Training: {aname} from {unit.name} (tag={unit.tag})")
+                await self.do(unit(ability))
+                return
+            # If force_army and no army available, do NOT fall back to workers
+            if force_army:
+                return
         elif self.workers and self.townhalls:
             # Still need workers — train one
             for unit, ability in caps:
@@ -790,7 +812,7 @@ class IterateBot(BotAI):
                     continue
                 aname = ability.name
                 if any(kw in aname for kw in ("TRAIN", "MORPH")) and any(
-                        kw in aname for kw in ("DRONE", "SCV", "PROBE")):
+                        kw in aname for kw in self.WORKER_KEYWORDS):
                     if unit.is_idle and self.can_afford(ability):
                         await self.do(unit(ability))
                         return
@@ -806,7 +828,7 @@ class IterateBot(BotAI):
                 if "MORPH" in aname:
                     continue
                 # Any ability with supply-increasing keywords
-                if any(kw in aname for kw in ("SUPPLY", "OVERLORD", "PYLON", "DEPOT")):
+                if any(kw in aname for kw in self.SUPPLY_KEYWORDS):
                     if self.can_afford(ability):
                         try:
                             pos = await self.find_placement(ability, near=th_pos, max_distance=20)
@@ -836,11 +858,14 @@ class IterateBot(BotAI):
                         except (KeyError, Exception):
                             pass
 
-        # 3. Need gas — try to build extractor (drone must be on geyser first)
+        # 3. Need gas — try to build extractor (worker must be on geyser first)
         gas_structures = self.units.structure.filter(
-            lambda s: "EXTRACTOR" in s.name.upper())
+            lambda s: any(kw in s.name.upper() for kw in self.GAS_KEYWORDS))
         gas_count = len(gas_structures)
         gas_needed = min(len(self.workers) // 3, 2) if self.townhalls else 0
+        # Also consider: if we have lots of minerals but low gas, need more gas
+        if self.minerals > 300 and self.vespene < 50:
+            gas_needed = max(gas_needed, 2)
         if gas_count < gas_needed and self.minerals >= 75:
             th_pos = self.townhalls.first.position
             enemy_pos = self.enemy_start_locations[0] if self.enemy_start_locations else None
@@ -867,46 +892,14 @@ class IterateBot(BotAI):
                     if ability == skip:
                         continue
                     aname = ability.name
-                    if "ZERGBUILD" in aname or "EXTRACTOR" in aname:
+                    if unit in self.workers and any(kw in aname for kw in self.GAS_KEYWORDS):
                         if self.can_afford(ability):
                             try:
-                                # If drone already on geyser, build
-                                if unit.position.distance_to(best_geyser.position) < 2:
-                                    await self.do(unit(ability, target=best_geyser))
-                                    return
-                                # Otherwise move drone to geyser first
-                                await self.do(unit.move(best_geyser))
+                                # SC2 API handles worker movement automatically
+                                await self.do(unit(ability, target=best_geyser))
                                 return
                             except (KeyError, Exception):
                                 pass
-
-        # 4. Train from any available training ability (filter: idle, not larva already morphing)
-        for unit, ability in caps:
-            if ability == skip:
-                continue
-            aname = ability.name
-            if "TRAIN" in aname or "MORPH" in aname:
-                # Only train from idle units that aren't already producing
-                if unit.is_idle and self.can_afford(ability) or unit.is_moving and self.can_afford(ability):
-                    # For Zerg larva, check persistent morphing tracking
-                    if "LARVA" in unit.name.upper():
-                        # Skip if larva is already morphing (has orders)
-                        if unit.orders:
-                            continue
-                        # Skip if we commanded it recently (morph takes ~15 ticks)
-                        if unit.tag in self._morphing_larvae:
-                            if self._step - self._morphing_larvae[unit.tag] < 150:
-                                continue
-                            # Clean up old entries (older than 30 ticks)
-                            if self._step - self._morphing_larvae[unit.tag] > 300:
-                                del self._morphing_larvae[unit.tag]
-                    # Don't queue if unit already has 5 orders (queue full)
-                    if hasattr(unit, 'orders') and len(unit.orders) >= 5:
-                        continue
-                    await self.do(unit(ability))
-                    if "LARVA" in unit.name.upper():
-                        self._morphing_larvae[unit.tag] = self._step
-                    return
 
     async def _exec_attack(self, caps):
         """Send combat units to attack enemy base.
@@ -926,8 +919,8 @@ class IterateBot(BotAI):
 
         worker_ids = {u.tag for u in self.workers}
         supply_ids = {u.tag for u in self.units if any(
-            kw in u.name.upper() for kw in ("OVERLORD", "OVERSEER", "OBSERVER"))}
-        spawned_names = {"LOCUST", "BROODLING", "INTERCEPTOR", "AUTOTURRET"}
+            kw in u.name.upper() for kw in self.SUPPLY_NAMES)}
+        spawned = self.SPAWNED_NAMES
 
         combat_units = []
         for u in self.units:
@@ -935,7 +928,7 @@ class IterateBot(BotAI):
                 continue
             if u.is_structure or not u.can_attack:
                 continue
-            if u.name.upper() in spawned_names:
+            if u.name.upper() in spawned:
                 continue
             info = self._unit_classifier.classify(u)
             if info and (Role.ARMY in info.roles or Role.SCOUT in info.roles):
@@ -948,7 +941,7 @@ class IterateBot(BotAI):
         enemy_air = [
             eu for eu in self.known_enemy_units
             if not eu.is_structure
-            and eu.type_id.name.upper() not in spawned_names
+            and eu.type_id.name.upper() not in spawned
             and self._unit_classifier.classify(eu)
             and self._unit_classifier.classify(eu).movement == Movement.AIR
         ]
@@ -987,7 +980,7 @@ class IterateBot(BotAI):
             visible_enemy = [
                 eu for eu in self.known_enemy_units
                 if not eu.is_structure
-                and eu.type_id.name.upper() not in spawned_names
+                and eu.type_id.name.upper() not in spawned
                 and eu.position.distance_to(target) < 40
             ]
             if visible_enemy:
@@ -1010,8 +1003,8 @@ class IterateBot(BotAI):
 
         worker_ids = {u.tag for u in self.workers}
         supply_ids = {u.tag for u in self.units if any(
-            kw in u.name.upper() for kw in ("OVERLORD", "OVERSEER", "OBSERVER"))}
-        spawned_names = {"LOCUST", "BROODLING", "INTERCEPTOR", "AUTOTURRET"}
+            kw in u.name.upper() for kw in self.SUPPLY_NAMES)}
+        spawned = self.SPAWNED_NAMES
 
         combat_units = []
         for u in self.units:
@@ -1019,7 +1012,7 @@ class IterateBot(BotAI):
                 continue
             if u.is_structure or not u.can_attack:
                 continue
-            if u.name.upper() in spawned_names:
+            if u.name.upper() in spawned:
                 continue
             info = self._unit_classifier.classify(u)
             if info and (Role.ARMY in info.roles or Role.SUPPORT in info.roles):
@@ -1082,7 +1075,7 @@ class IterateBot(BotAI):
         for unit, ability in caps:
             if unit in self.workers:
                 aname = ability.name
-                if any(kw in aname for kw in ("COMMANDCENTER", "NEXUS", "HATCHERY", "LAIR", "HIVE")):
+                if any(kw in aname for kw in self.TOWNHALL_KEYWORDS):
                     if self.can_afford(ability):
                         pos = await self.find_placement(ability, near=loc)
                         if pos:
@@ -1090,93 +1083,66 @@ class IterateBot(BotAI):
                             return
 
     async def _exec_tech_up(self, caps):
-        """Build tech structures and research upgrades."""
-        # Skip abilities that failed within the last 50 ticks
+        """Build tech structures and research upgrades.
+
+        Substrate-agnostic: discovers available BUILD and RESEARCH abilities
+        from capabilities rather than hardcoding race-specific structures.
+        """
         skip = self._last_failed_ability if (self._step - self._last_failed_tick < 50) else None
-        
-        # Build tech structures first (spawning pool, evo chamber, hydra den, spire, etc.)
-        tech_structures = {
-            "spawningpool": "BUILD_SPAWNINGPOOL",
-            "evolutionchamber": "BUILD_EVOLUTIONCHAMBER", 
-            "hydraliskden": "BUILD_HYDRALISKDEN",
-            "spire": "BUILD_SPIRE",
-            "greaterspire": "BUILD_GREATERSPIRE",
-            "infestationpit": "BUILD_INFESTATIONPIT",
-            "ultraliskcavern": "BUILD_ULTRALISKCAVERN",
-            "nydusnetwork": "BUILD_NYDUSNETWORK",
-            "banelingnest": "BUILD_BANELINGNEST",
-            "roachwarren": "BUILD_ROACHWARREN",
-        }
-        
-        # Check what tech structures we already have
-        existing_structs = {s.name.lower() for s in self.units.structure}
-        
-        # Build next needed tech structure based on what we have and can afford
-        for struct_name, build_keyword in tech_structures.items():
-            if struct_name in existing_structs:
+
+        townhall_types = {s.type_id for s in self.townhalls}
+        existing_structs = {s.type_id for s in self.units.structure if s.type_id not in townhall_types}
+
+        # Phase 1: Build a tech structure we don't already have
+        # Find any BUILD ability that creates a non-townhall, non-supply, non-gas structure
+        for unit, ability in caps:
+            if ability == skip:
                 continue
-            if struct_name == "greaterspire" and "spire" not in existing_structs:
+            if unit not in self.workers:
                 continue
-            if struct_name in ("ultraliskcavern", "infestationpit") and "hive" not in existing_structs and "lair" not in existing_structs:
+            aname = ability.name
+            if "BUILD" not in aname:
                 continue
-                
-            for unit, ability in caps:
-                if ability == skip:
-                    continue
-                aname = ability.name
-                if build_keyword in aname and unit in self.workers:
-                    if self.can_afford(ability):
-                        try:
-                            th_pos = self.townhalls.first.position if self.townhalls else None
-                            if th_pos:
-                                pos = await self.find_placement(ability, near=th_pos, max_distance=20)
-                                if pos:
-                                    await self.do(unit(ability, target=pos))
-                                    return
-                        except (KeyError, Exception):
-                            pass
-        
-        # Research upgrades from existing tech structures
-        upgrade_abilities = {
-            "spawningpool": ["RESEARCH_ZERGLINGMETABOLICBOOST", "RESEARCH_ZERGLINGATTACKSPEED"],
-            "evolutionchamber": ["RESEARCH_ZERGMELEEWEAPONSLEVEL1", "RESEARCH_ZERGMISSILEWEAPONSLEVEL1", "RESEARCH_ZERGGROUNDARMORSLEVEL1"],
-            "hydraliskden": ["RESEARCH_HYDRALISKRANGE", "RESEARCH_HYDRALISKSPEED"],
-            "spire": ["RESEARCH_ZERGFLYERWEAPONSLEVEL1", "RESEARCH_ZERGFLYERARMORSLEVEL1"],
-            "infestationpit": ["RESEARCH_PATHOGENGlands", "RESEARCH_NEURALPARASITE"],
-            "ultraliskcavern": ["RESEARCH_ULTRALISKARMOR"],
-        }
-        
-        for struct_name, upgrade_keywords in upgrade_abilities.items():
-            if struct_name not in existing_structs:
+            # Skip supply and gas structures (handled elsewhere)
+            if any(kw in aname for kw in self.SUPPLY_KEYWORDS):
                 continue
-            # Find the structure
-            struct = None
-            for s in self.units.structure:
-                if struct_name.upper() in s.name.upper():
-                    struct = s
-                    break
-            if not struct or not struct.is_idle:
+            if any(kw in aname for kw in self.GAS_KEYWORDS):
                 continue
-            
-            for unit, ability in caps:
-                if ability == skip:
-                    continue
-                if unit.tag != struct.tag:
-                    continue
-                aname = ability.name
-                for keyword in upgrade_keywords:
-                    if keyword in aname:
-                        if self.can_afford(ability):
-                            await self.do(unit(ability))
+            # Skip townhall builds (handled by expand)
+            if any(kw in aname for kw in self.TOWNHALL_KEYWORDS):
+                continue
+            if self.can_afford(ability):
+                try:
+                    th_pos = self.townhalls.first.position if self.townhalls else None
+                    if th_pos:
+                        pos = await self.find_placement(ability, near=th_pos, max_distance=20)
+                        if pos:
+                            print(f"[DEBUG tech_up] Building: {aname} at {pos}")
+                            await self.do(unit(ability, target=pos))
                             return
-        
-        # Morph townhalls (Lair, Hive)
-        morph_keywords = {"MORPH_LAIR", "MORPH_HIVE", "MORPH_GREATERSPIRE"}
+                except (KeyError, Exception):
+                    pass
+
+        # Phase 2: Research upgrades from existing tech structures
+        # Find any structure that has RESEARCH abilities
+        for struct in self.units.structure:
+            if struct.is_idle and struct.type_id not in townhall_types:
+                for unit, ability in caps:
+                    if ability == skip:
+                        continue
+                    if unit.tag != struct.tag:
+                        continue
+                    aname = ability.name
+                    if "RESEARCH" in aname and self.can_afford(ability):
+                        await self.do(unit(ability))
+                        return
+
+        # Phase 3: Morph advanced townhalls (Lair, Hive, Orbital, Planetary)
         for unit, ability in caps:
             if ability == skip:
                 continue
             aname = ability.name
-            if any(kw in aname for kw in morph_keywords):
+            if "MORPH" in aname and any(kw in aname for kw in self.TOWNHALL_KEYWORDS):
                 if unit.is_idle and self.can_afford(ability):
                     await self.do(unit(ability))
                     return
@@ -1251,6 +1217,20 @@ class IterateBot(BotAI):
         return None
 
     def on_end(self, game_result):
+        try:
+            self._on_end_impl(game_result)
+        except Exception as e:
+            print(f"  on_end error (non-fatal): {e}")
+            # Still save what we can
+            try:
+                self.model_pool.save(MODEL_PATH)
+                self.tactical_brain.save(TACTICAL_BRAIN_PATH)
+            except Exception:
+                pass
+
+    def _on_end_impl(self, game_result):
+        if game_result is None:
+            game_result = "Result.Victory"
         elapsed = time.time() - self._start_time
         workers = len(self.workers)
         army = self._count_army()
@@ -1533,6 +1513,9 @@ def main():
     parser.add_argument("--games", type=int, default=3, help="Number of games to run")
     parser.add_argument("--difficulty", default="Easy",
                         choices=["Easy", "Medium", "Hard", "VeryHard"])
+    parser.add_argument("--race", default="Zerg",
+                        choices=["Zerg", "Terran", "Protoss", "Random"],
+                        help="Race to play")
     parser.add_argument("--realtime", action="store_true")
     parser.add_argument("--infinite", action="store_true", help="Run forever")
     parser.add_argument("--size", default="64",
@@ -1610,20 +1593,28 @@ def main():
                 "map_name": map_name,
                 "realtime": args.realtime,
                 "difficulty": args.difficulty,
+                "race": args.race,
                 "game_number": game_num,
             }
 
             bot = IterateBot(config)
 
-            result = run_game(
-                map_settings=map_settings,
-                players=[
-                    Bot(Race.Zerg, bot),
-                    Computer(Race.Random, difficulty_map[args.difficulty]),
-                ],
-                realtime=False,
-                step_time_limit=ttl,
-            )
+            try:
+                bot_race = Race.Zerg if args.race == "Zerg" else (
+                    Race.Terran if args.race == "Terran" else (
+                    Race.Protoss if args.race == "Protoss" else Race.Random))
+                result = run_game(
+                    map_settings=map_settings,
+                    players=[
+                        Bot(bot_race, bot),
+                        Computer(Race.Random, difficulty_map[args.difficulty]),
+                    ],
+                    realtime=args.realtime,
+                    step_time_limit=None if args.realtime else ttl,
+                )
+            except Exception as e:
+                print(f"\n  Game {game_num} crashed: {e}")
+                result = None
 
             print(f"\n  Game {game_num} result: {result}")
 

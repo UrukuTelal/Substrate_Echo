@@ -181,7 +181,16 @@ class WorldState:
     def from_botai(cls, bot, tick: int = 0) -> 'WorldState':
         """Create from BotAI instance — fully race-agnostic."""
         workers = len(bot.workers)
-        army = len(bot.units)
+        # Combat units only (excludes workers, supply, structures, spawned)
+        supply_ids = {u.tag for u in bot.units if any(
+            kw in u.name.upper() for kw in ("OVERLORD", "OVERSEER", "OBSERVER", "MEDIVAC", "WARP_PRISM"))}
+        spawned_names = {"LOCUST", "BROODLING", "INTERCEPTOR", "AUTOTURRET", "LARVA", "EGG", "COCOON"}
+        combat_units = [u for u in bot.units 
+                        if u.tag not in supply_ids 
+                        and not u.is_structure 
+                        and u.can_attack
+                        and u.name.upper() not in spawned_names]
+        army = len(combat_units)
         bases = len(bot.townhalls)
         # Production = structures that aren't townhalls
         townhall_ids = {s.type_id for s in bot.townhalls}
@@ -221,8 +230,8 @@ class WorldState:
         uc = UnitClassifier()
         worker_ids = {u.tag for u in bot.workers}
         supply_ids = {u.tag for u in bot.units if any(
-            kw in u.name.upper() for kw in ("OVERLORD", "OVERSEER", "OBSERVER"))}
-        spawned_names = {"LOCUST", "BROODLING", "INTERCEPTOR", "AUTOTURRET"}
+            kw in u.name.upper() for kw in ("OVERLORD", "OVERSEER", "OBSERVER", "MEDIVAC", "WARP_PRISM", "COLOSSUS"))}
+        spawned_names = {"LOCUST", "BROODLING", "INTERCEPTOR", "AUTOTURRET", "LARVA", "EGG", "COCOON"}
 
         combat_units = []
         for u in bot.units:
@@ -235,6 +244,9 @@ class WorldState:
             info = uc.classify(u)
             if info and (Role.ARMY in info.roles or Role.SCOUT in info.roles):
                 combat_units.append(u)
+
+        army = len(combat_units)
+        bases = len(bot.townhalls)
 
         anti_air = 0
         dual = 0
@@ -414,10 +426,13 @@ class AffordanceTracer:
         """Generate economy-related affordances."""
         candidates = []
 
-        # Expand
+        # Expand — more gas geysers available at new bases
         if w.bases < 4 and w.minerals >= 300 and w.workers >= 8:
             success = min(0.9, 0.5 + w.workers * 0.02)
             reward = 200.0 if w.bases < 2 else 100.0
+            # Gas-starved: expansion is more valuable (access to new geysers)
+            if w.vespene < 100 and w.gas_geysers and len(w.gas_geysers) <= w.bases:
+                reward *= 1.3
             candidates.append(AffordanceCandidate(
                 action_type=SC2ActionType.EXPAND,
                 description=f"Build base #{w.bases + 1}",
@@ -427,11 +442,10 @@ class AffordanceTracer:
                 cost_level=CostLevel.MEDIUM,
                 risk=0.15,
                 confidence=0.8,
-                requires_unit="SCV",
                 # need_affinities provided by AffordanceModel (learned)
             ))
 
-        # Build economy (SCVs)
+        # Build economy (workers)
         if w.workers < 60 and w.minerals >= 50 and w.supply_used < w.supply_cap:
             candidates.append(AffordanceCandidate(
                 action_type=SC2ActionType.BUILD_ECONOMY,
@@ -442,7 +456,6 @@ class AffordanceTracer:
                 cost_level=CostLevel.LOW,
                 risk=0.0,
                 confidence=0.9,
-                requires_structure="CommandCenter",
                 # need_affinities provided by AffordanceModel (learned)
             ))
 
@@ -462,16 +475,18 @@ class AffordanceTracer:
                 # need_affinities provided by AffordanceModel (learned)
             ))
 
-        # Tech up — build structures or research upgrades
+        # Tech up — build structures or research upgrades (needs minerals + gas)
         if w.minerals >= 100 and w.production_buildings >= 1:
+            gas_available = w.vespene >= 50
+            tech_success = 0.9 if gas_available else 0.7  # gas-limited tech is riskier
             candidates.append(AffordanceCandidate(
                 action_type=SC2ActionType.TECH_UP,
-                description="Build tech structure or research upgrade",
-                success_probability=0.85,
-                expected_reward=80.0,
+                description=f"Build tech structure or research upgrade (gas={w.vespene:.0f})",
+                success_probability=tech_success,
+                expected_reward=80.0 if gas_available else 40.0,
                 resource_cost=150.0,
                 cost_level=CostLevel.MEDIUM,
-                risk=0.05,
+                risk=0.05 if gas_available else 0.2,
                 confidence=0.7,
                 # need_affinities provided by AffordanceModel (learned)
             ))
@@ -487,15 +502,20 @@ class AffordanceTracer:
         """
         candidates = []
 
-        # Build army
+        # Build army — requires minerals, benefits from having gas
         if w.minerals >= 50 and w.supply_used < w.supply_cap:
             army_rate = 1.0 if w.production_buildings >= 2 else 0.5
+            # Gas availability boosts army quality (gas units are stronger)
+            gas_bonus = 1.0 + min(0.3, w.vespene / 500.0)
+            # Low gas means only mineral-only units (weaker army)
+            if w.vespene < 50 and w.gas_geysers and len(w.gas_geysers) > 0:
+                gas_bonus = 0.7
             candidates.append(AffordanceCandidate(
                 action_type=SC2ActionType.BUILD_ARMY,
-                description=f"Train military units (army={w.army_count})",
-                success_probability=0.9,
-                expected_reward=60.0 * army_rate,
-                resource_cost=50.0,
+                description=f"Train military units (army={w.army_count}, gas={w.vespene:.0f})",
+                success_probability=min(0.95, 0.9 * gas_bonus),
+                expected_reward=60.0 * army_rate * gas_bonus,
+                resource_cost=50.0 + w.vespene * 0.1,
                 cost_level=CostLevel.LOW,
                 risk=0.0,
                 confidence=0.85,

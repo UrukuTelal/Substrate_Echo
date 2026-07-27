@@ -2,6 +2,65 @@
 
 All notable changes to Substrate_Echo will be documented in this file.
 
+## [0.15.0] - 2026-07-27
+
+### Fixed — Core Training & Execution Pipeline
+
+**WorldState army_count bug** (`substrate_echo/epistemology/affordance_tracer.py:184`):
+- Was counting ALL units (workers, structures, overlords) as "army"
+- Fixed to only count combat units (excludes workers, supply, structures, spawned)
+- Attack affordance now correctly gates on actual army ≥ 5
+
+**_exec_train execution logic** (`scripts/sc2_iterate_01.py`):
+- `build_army` action now correctly forces army training via `force_army=True`
+- Removed unconditional general training loop at end of `_exec_train` that always trained drones
+- Army training now filters out workers AND supply units (overlords, medivacs, etc.)
+
+**Gas awareness** (`substrate_echo/epistemology/affordance_tracer.py`, `scripts/sc2_iterate_01.py`):
+- Drives system now factors actual vespene reserves into GAS satisfaction
+- Gas building gate triggers when minerals high but gas low (minerals > 300, gas < 50)
+- Build_army affordance scales reward/success with gas availability
+- Tech_up affordance penalizes gas-starved tech attempts
+- Expand reward boosted when gas-starved (new base = new geysers)
+
+**_exec_tech_up rewritten substrate-agnostic** (`scripts/sc2_iterate_01.py`):
+- Discovers BUILD/RESEARCH/MORPH abilities dynamically from capabilities
+- No longer hardcoded Zerg tech tree — works for all races
+- Phase 1: builds any non-supply/non-gas/non-townhall structure
+- Phase 2: researches any idle tech structure
+- Phase 3: morphs advanced townhalls
+
+**Gas building fixes** (`scripts/sc2_iterate_01.py`):
+- Removed two-step move-then-build pattern; SC2 API handles worker movement
+- Removed dead `_drone_to_geyser` tracking dict
+- Gas structure filter now race-agnostic (EXTRACTOR/ASSIMILATOR/REFINERY)
+
+**Race lock removed**:
+- `--race` CLI arg added (Zerg/Terran/Protoss/Random)
+- `Race.Zerg` hardcode replaced with config-driven race selection
+
+**Race-agnostic name constants** (`scripts/sc2_iterate_01.py` class-level):
+- `SUPPLY_NAMES`, `SPAWNED_NAMES`, `WORKER_KEYWORDS`, `SUPPLY_KEYWORDS`, `TOWNHALL_KEYWORDS`, `GAS_KEYWORDS`
+- Replaced 4× duplicated inline sets
+
+**F1 spam mitigation**:
+- TRAIN/MORPH filter excludes BUILD abilities (which need target positions)
+
+### Added
+- `scripts/sc2_iterate_01.py`: `--race` argument
+- `substrate_echo/epistemology/affordance_tracer.py`: `vespene` field used in drives
+- Debug logging for `tech_up` and `build_army` execution
+
+### Changed
+- `build_army` action distribution increased from ~1% to ~5-20%
+- `tech_up` now successfully builds Spawning Pool, Evolution Chamber
+- Zerglings trained and attack when army ≥ 5
+
+### Known Issues
+- Zerglings may be classified as scouts by affordance tracer
+- Larva TRAIN_DRONE spam errors expected (waiting for minerals/larva limit)
+- Gas extractor build errors when drone already on geyser
+
 ## [0.14.0] - 2026-07-26
 
 ### Added — Representational Layer (shared semantic substrate)
