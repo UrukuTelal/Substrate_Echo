@@ -49,12 +49,19 @@ from substrate_echo.embodiments.sc2.unit_classifier import (
     UnitClassifier, Role, Movement, AttackCapability,
 )
 from substrate_echo.epistemology.tactical_brain import TacticalBrain, BattleState
-from substrate_echo.epistemology.replay_auditor import ReplayAuditor
+from substrate_echo.epistemology.replay_auditor import ReplayAuditor, EpistemicLedger, StrategyContext
+from substrate_echo.representational import (
+    Ontology, StateGraph, SemanticInterpreter, CausalGraph,
+    FrameSystem, NarrativeLayer, Perspective,
+    PERSPECTIVE_EARLY_GAME, PERSPECTIVE_MID_GAME,
+)
 
 
 MODEL_PATH = str(Path(__file__).parent.parent / "data" / "affordance_models.json")
 LOG_PATH = str(Path(__file__).parent.parent / "data" / "iteration_log.jsonl")
 TACTICAL_BRAIN_PATH = str(Path(__file__).parent.parent / "data" / "tactical_brain.json")
+LEDGER_PATH = str(Path(__file__).parent.parent / "data" / "epistemic_ledger.json")
+REPRESENTATIONAL_PATH = str(Path(__file__).parent.parent / "data" / "representational")
 
 
 class IterateBot(BotAI):
@@ -99,6 +106,9 @@ class IterateBot(BotAI):
         self._unit_classifier = UnitClassifier()
         self.tactical_brain = TacticalBrain()
         self.auditor = ReplayAuditor()
+        self.ledger = EpistemicLedger()
+        if Path(LEDGER_PATH).exists():
+            self.ledger.load(LEDGER_PATH)
         self._my_player_id = None
         self._chat_log: List[Dict] = []
         self._last_failed_ability = None
@@ -111,6 +121,8 @@ class IterateBot(BotAI):
         self._prev_observation = None
         self._prev_deficits = None
         self._prev_action = None
+        self._spawned_names = {"LOCUST", "BROODLING", "INTERCEPTOR", "AUTOTURRET"}
+        self._supply_names = {"OVERLORD", "OVERSEER", "OBSERVER"}
         self._cached_caps = []
         self._caps_unit_count = 0
         self._caps_refresh_tick = 0
@@ -139,16 +151,43 @@ class IterateBot(BotAI):
         if Path(TACTICAL_BRAIN_PATH).exists():
             self.tactical_brain.load(TACTICAL_BRAIN_PATH)
 
+        # Representational Layer — shared semantic substrate
+        self.ontology = Ontology()
+        self.state_graph = StateGraph()
+        self.interpreter = SemanticInterpreter(self.ontology, self.state_graph)
+        self.causal_graph = CausalGraph()
+        self.frame_system = FrameSystem(self.state_graph, self.causal_graph)
+        self.narrative_layer = NarrativeLayer(self.causal_graph)
+        self._last_representational_tick = 0
+
     def on_start(self):
         self._start_time = time.time()
         self._race = Race.Zerg  # Force Zerg for testing
         self._my_player_id = self.state.common.player_id
+        self.ledger.begin_game(self.config.get("game_number", 0))
+
+    def _count_army(self):
+        """Count actual combat units, excluding workers, supply, structures, and spawned."""
+        worker_ids = {u.tag for u in self.workers}
+        count = 0
+        for u in self.units:
+            if u.tag in worker_ids:
+                continue
+            if u.is_structure:
+                continue
+            if u.name.upper() in self._supply_names:
+                continue
+            if u.name.upper() in self._spawned_names:
+                continue
+            if u.can_attack:
+                count += 1
+        return count
 
     async def on_step(self, iteration: int):
         self._step += 1
 
         workers = len(self.workers)
-        army = len(self.units) - workers  
+        army = self._count_army()
         bases = len(self.townhalls)
 
         # Kernel observation (throttled internally)
@@ -178,9 +217,25 @@ class IterateBot(BotAI):
             timestamp=time.time(),
             metadata={"step": self._step, "minerals": self.minerals,
                       "workers": workers, "army": army, "bases": bases,
-                      "supply_used": self.supply_used, "supply_cap": self.supply_cap},
+                      "supply_used": self.supply_used, "supply_cap": self.supply_cap,
+                      "map_revealed": self.encoder.information.map_revealed,
+                      "terrain_complexity": self.encoder.information.terrain_complexity,
+                      "cliff_density": self.encoder.information.cliff_density,
+                      "visibility_advantage": self.encoder.information.visibility_advantage},
         )
         cognitive_state = self.kernel.publish_observation(kernel_obs)
+
+        # ── Representational Layer tick ──
+        if self._step % 3 == 0:  # every 3 ticks to avoid overhead
+            # Interpret game state into EntityDescriptors
+            self.interpreter.interpret_tick(self, self._step)
+
+            # Record significant events in causal graph
+            self._record_causal_events(workers, army, bases)
+
+            # Update frame system and narrative layer
+            self.frame_system.set_perspective(self._select_perspective())
+            self.narrative_layer.process_tick(self._step)
 
         # Entity model (every tick lightweight, evidence every 50)
         if self._step == 1:
@@ -198,6 +253,9 @@ class IterateBot(BotAI):
 
         # Auditor: record tick for failure analysis
         self.auditor.record_tick(self._step, self, action_type)
+
+        # Populate epistemic ledger with evidence from this tick
+        self.auditor.populate_ledger(self.ledger, self)
 
         # Chain recording (throttled — every 5 ticks)
         if self._step % 5 == 0:
@@ -269,13 +327,49 @@ class IterateBot(BotAI):
 
             total_engaged = len(self._last_attack_units) + len(self._last_attack_enemies)
             if total_engaged > 0 and self._tactical_state:
+                outcome = "won" if enemy_killed > our_killed else "lost"
                 self.tactical_brain.record_battle_outcome(
                     step=self._step,
                     our_composition=self._last_attack_units,
                     enemy_composition=self._last_attack_enemies,
                     our_killed=our_killed,
                     enemy_killed=enemy_killed,
-                    outcome="won" if enemy_killed > our_killed else "lost",
+                    outcome=outcome,
+                )
+
+                # Record hypothesis outcome in epistemic ledger
+                comp_key = "+".join(sorted(set(self._last_attack_units.values())))
+                hyp_name = f"attack_{comp_key}"
+                ctx = StrategyContext(
+                    tick=self._step,
+                    army_value=sum(
+                        u.health + getattr(u, 'shield', 0)
+                        for u in self.units if u.tag in self._last_attack_units
+                    ),
+                    army_count=len(self._last_attack_units),
+                    worker_count=len(self.workers),
+                    base_count=len(self.townhalls),
+                    minerals=self.minerals,
+                    vespene=self.vespene,
+                    supply_used=self.supply_used,
+                    supply_cap=self.supply_cap,
+                    enemy_visible=len(self.known_enemy_units),
+                    enemy_army_value=snap.enemy_army_value if (snap := self.auditor._snapshots[-1] if self.auditor._snapshots else None) else 0.0,
+                    terrain_complexity=self.encoder.information.terrain_complexity,
+                    cliff_density=self.encoder.information.cliff_density,
+                    visibility_advantage=self.encoder.information.visibility_advantage,
+                )
+                self.ledger.record_hypothesis_outcome(
+                    name=hyp_name,
+                    outcome=outcome,
+                    tick=self._step,
+                    evidence_data={
+                        "our_composition": list(self._last_attack_units.values()),
+                        "enemy_composition": list(self._last_attack_enemies.values()),
+                        "units_lost": our_killed,
+                        "enemies_killed": enemy_killed,
+                    },
+                    context=ctx,
                 )
 
             # Clear tracking after evaluation
@@ -342,6 +436,64 @@ class IterateBot(BotAI):
             NeedType.INTEL: intel, NeedType.DEFENSE: defense,
             NeedType.EXPANSION: expansion, NeedType.TECHNOLOGY: tech,
         }, tick=self._step)
+
+    def _record_causal_events(self, workers, army, bases):
+        """Record significant game events in the causal graph."""
+        from substrate_echo.representational.causal_graph import EventType
+
+        # Track army changes for causal events
+        if not hasattr(self, '_prev_army'):
+            self._prev_army = army
+            self._prev_workers = workers
+            self._prev_bases = bases
+
+        army_delta = army - self._prev_army
+        if army_delta < -3:
+            self.causal_graph.record_event(
+                EventType.UNIT_DAMAGED, self._step, "own_army", "Army",
+                f"Army lost {abs(army_delta)} units",
+                0.9, {"delta": army_delta})
+        elif army_delta > 3:
+            self.causal_graph.record_event(
+                EventType.UNIT_CREATED, self._step, "own_army", "Army",
+                f"Army grew by {army_delta} units",
+                0.9, {"delta": army_delta})
+
+        if workers != self._prev_workers:
+            self.causal_graph.record_event(
+                EventType.RESOURCE_CHANGED, self._step, "economy", "Economy",
+                f"Workers: {self._prev_workers} → {workers}",
+                0.8, {"from": self._prev_workers, "to": workers})
+
+        if bases != self._prev_bases:
+            self.causal_graph.record_event(
+                EventType.EXPANSION_STARTED if bases > self._prev_bases else EventType.STRUCTURE_DESTROYED,
+                self._step, "bases", "Bases",
+                f"Bases: {self._prev_bases} → {bases}",
+                1.0, {"from": self._prev_bases, "to": bases})
+
+        self._prev_army = army
+        self._prev_workers = workers
+        self._prev_bases = bases
+
+    def _select_perspective(self):
+        """Select the appropriate frame perspective based on game state."""
+        army = self._count_army()
+        enemy_count = len(self.known_enemy_units)
+
+        if self._step < 500:
+            return PERSPECTIVE_EARLY_GAME
+        elif enemy_count > 0 and army > 0:
+            # Check if we're under pressure
+            threat_ratio = enemy_count / max(1, army)
+            if threat_ratio > 1.5:
+                from substrate_echo.representational.frames import PERSPECTIVE_UNDER_ATTACK
+                return PERSPECTIVE_UNDER_ATTACK
+            elif threat_ratio < 0.5:
+                from substrate_echo.representational.frames import PERSPECTIVE_ATTACKING
+                return PERSPECTIVE_ATTACKING
+
+        return PERSPECTIVE_MID_GAME
 
     def _interpret_action(self):
         world = WorldState.from_botai(self, tick=self._step)
@@ -410,7 +562,7 @@ class IterateBot(BotAI):
         else:
             best_candidate, best_score_obj = scored[0]
 
-        army_count = len(self.units)  # workers count as army
+        army_count = self._count_army()
         total_units = max(1, len(self.units))
         army_exposure = army_count / total_units
 
@@ -522,9 +674,12 @@ class IterateBot(BotAI):
             for eu in self.known_enemy_units
         ) if self.townhalls else False
 
+        # Visibility-aware engagement: only push out when we have adequate vision
+        vis_adv = self.encoder.information.visibility_advantage
         if (len(army_units) >= 8
                 and self.enemy_start_locations
-                and self._step % 300 < 50):
+                and self._step % 300 < 50
+                and vis_adv > 0.3):
             action_type = "attack"
         elif enemy_nearby and army_units:
             action_type = "attack"
@@ -584,12 +739,11 @@ class IterateBot(BotAI):
         if self._diminishing_returns and self.workers:
             # Counter-unit override: if tactical brain suggests a specific unit, try it first
             suggested_type = None
-            if self._tactical_state and self._tactical_state.enemy_army:
-                suggestion = self.tactical_brain.suggest_counter_unit(self._tactical_state)
+            if self._tactical_state and self._tactical_state.enemy.unit_counts:
+                suggestion = self.tactical_brain.suggest_counter_unit(
+                    self._tactical_state.enemy.unit_counts, self._step)
                 if suggestion:
-                    suggested_type, confidence = suggestion
-                    if confidence < 0.3:
-                        suggested_type = None  # too low confidence
+                    suggested_type = suggestion
 
             if suggested_type:
                 # Try to build the suggested counter-unit
@@ -744,6 +898,8 @@ class IterateBot(BotAI):
         - If enemy has visible air units, prioritize anti-air + dual-attack units
         - Dual-attack units (can hit both air and ground) are always included
         - Workers, overlords, and spawned units excluded
+        - On cliff-heavy maps, prioritize cliff-traversable units (Reaper, Colossus)
+        - On low-visibility maps, send scouts ahead
 
         Tracks battle composition for TacticalBrain hypothesis generation.
         """
@@ -800,6 +956,15 @@ class IterateBot(BotAI):
         else:
             attack_group = combat_units
 
+        # Terrain-aware ordering: on cliff-heavy maps, send cliff-traversable
+        # units (Reaper, Colossus) first — they navigate terrain faster
+        cliff_density = self.encoder.information.cliff_density
+        if cliff_density > 0.15 and len(attack_group) > 1:
+            cliff_units = self._unit_classifier.filter_cliff_traversable(attack_group)
+            other_units = [u for u in attack_group if u not in cliff_units]
+            if cliff_units:
+                attack_group = cliff_units + other_units
+
         # Record which enemies are engaged for outcome tracking
         if self._tactical_state and self.known_enemy_units:
             visible_enemy = [
@@ -820,6 +985,7 @@ class IterateBot(BotAI):
 
         Uses UnitClassifier to select army-role units.
         If enemy air is visible near base, prioritizes anti-air.
+        If terrain has high cliff density, prioritizes cliff-traversable units.
         """
         if not self.townhalls:
             return
@@ -866,6 +1032,14 @@ class IterateBot(BotAI):
             defend_group = dual + anti_air_only if (dual or anti_air_only) else combat_units
         else:
             defend_group = combat_units
+
+        # Terrain-aware: on cliff-heavy maps, prioritize units that can
+        # traverse cliffs to reach threats faster
+        cliff_density = self.encoder.information.cliff_density
+        if cliff_density > 0.15:
+            cliff_units = self._unit_classifier.filter_cliff_traversable(defend_group)
+            other_units = [u for u in defend_group if u not in cliff_units]
+            defend_group = cliff_units + other_units
 
         for unit in defend_group:
             if unit.is_idle or unit.is_moving:
@@ -1020,7 +1194,7 @@ class IterateBot(BotAI):
         Returns None if no response is warranted.
         """
         workers = len(self.workers)
-        army = len(self.units)
+        army = self._count_army()
         bases = len(self.townhalls)
         supply_pct = self.supply_used / max(1, self.supply_cap)
 
@@ -1062,7 +1236,7 @@ class IterateBot(BotAI):
     def on_end(self, game_result):
         elapsed = time.time() - self._start_time
         workers = len(self.workers)
-        army = len(self.units)
+        army = self._count_army()
         bases = len(self.townhalls)
 
         action_counts = {}
@@ -1122,8 +1296,32 @@ class IterateBot(BotAI):
         with open(LOG_PATH, "a") as f:
             f.write(json.dumps(result) + "\n")
 
+        # Finalize epistemic ledger
+        self.ledger.end_game(
+            game_number=self.config.get("game_number", 0),
+            result=str(game_result),
+            tick_count=self._step,
+            capabilities_used=[
+                cap_name.split(":")[-1]
+                for cap_name in self.ledger.capabilities
+                if self.ledger.capabilities[cap_name].last_seen_tick == self._step
+            ],
+        )
+        self.ledger.save(LEDGER_PATH)
+
+        # Save representational layer
+        rep_dir = REPRESENTATIONAL_PATH
+        os.makedirs(rep_dir, exist_ok=True)
+        self.state_graph.save(os.path.join(rep_dir, "state_graph.json"))
+        self.causal_graph.save(os.path.join(rep_dir, "causal_graph.json"))
+        self.narrative_layer.save(os.path.join(rep_dir, "narratives.json"))
+
         print(json.dumps(result, indent=2))
         print(audit_report.summary_text())
+        print(self.ledger.summary_text())
+        print(self.state_graph.summary_text())
+        print(self.causal_graph.summary_text())
+        print(self.narrative_layer.summary_text())
 
     def _integrate_replay_learnings(self, learnings: Dict[str, Any], parsed: ParsedReplay):
         """Integrate replay learnings into the bot's epistemic systems."""
@@ -1168,12 +1366,35 @@ class IterateBot(BotAI):
             race = counter.get("race", "?")
             
             if self.governance_gate:
-                # Record as learned constraint: avoid this strategy vs this race
                 weakness = failed_strat.get("weakness", "unknown")
-                self.governance_gate.add_learned_constraint(
-                    f"avoid_{weakness}_vs_{race}",
-                    f"Replay shows {race} with {weakness} weakness loses to {counter_strat}"
+                rule_id = f"replay_{weakness}_{race}_{counter_strat}"
+                desc = (f"Replay shows {race} with {weakness} "
+                        f"weakness loses to {counter_strat}")
+                from substrate_echo.epistemology.governance_gate import (
+                    GovernanceRule, RulePriority,
                 )
+                def _make_check(avoid_action, fallback):
+                    def _check(action_type, **kw):
+                        from substrate_echo.epistemology.governance_gate import (
+                            GovernanceVerdict, GovernanceDecision,
+                        )
+                        if action_type == avoid_action:
+                            return GovernanceVerdict(
+                                decision=GovernanceDecision.MODIFY,
+                                rule_id=rule_id,
+                                reason=desc,
+                                original_action=action_type,
+                                adjusted_action=fallback,
+                            )
+                        return None
+                    return _check
+                avoid_action = weakness if weakness != "unknown" else "attack"
+                self.governance_gate.add_rule(GovernanceRule(
+                    rule_id=rule_id,
+                    description=desc,
+                    priority=RulePriority.LOW,
+                    check=_make_check(avoid_action, "defend"),
+                ))
         
         # Feed economic patterns into drive targets
         for econ in learnings.get("economic_patterns", []):

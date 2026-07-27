@@ -72,24 +72,36 @@ class MilitaryState:
 
 @dataclass
 class InformationState:
-    """Information/uncertainty observation components."""
+    """Information/uncertainty observation components.
+
+    Encoded dims (first3 of to_vector):
+      [0] map_revealed:       fraction of walkable map currently visible
+      [1] terrain_complexity: fraction of pathing grid that is blocked
+      [2] cliff_density:      fraction of cells adjacent to height discontinuity
+
+    Additional fields stored as metadata (not in 16D vector):
+      enemy_known_ratio, visibility_advantage, enemy_bases_known,
+      last_scout_time, uncertainty
+    """
     scout_count: float = 0.0
     enemy_known_ratio: float = 0.0
     map_revealed: float = 0.0
-    enemy_army_known: float = 0.0
-    enemy_tech_known: float = 0.0
+    terrain_complexity: float = 0.0
+    cliff_density: float = 0.0
+    visibility_advantage: float = 0.5
     enemy_bases_known: float = 0.0
-    last_scout_time: float = 0.0  # seconds since last scout
-    uncertainty: float = 0.5  # 0=fully known, 1=unknown
+    last_scout_time: float = 0.0
+    uncertainty: float = 0.5
 
     def to_vector(self) -> List[float]:
         return [
-            min(1.0, self.scout_count / 10),
-            self.enemy_known_ratio,
             self.map_revealed,
-            self.enemy_army_known,
-            self.enemy_tech_known,
+            self.terrain_complexity,
+            self.cliff_density,
+            self.enemy_known_ratio,
+            self.visibility_advantage,
             min(1.0, self.enemy_bases_known / 5),
+            min(1.0, self.scout_count / 10),
             min(1.0, self.last_scout_time / 300),
             self.uncertainty,
         ]
@@ -158,11 +170,14 @@ class SC2ObservationEncoder:
         return vec
 
     def encode_from_botai(self, bot: Any) -> np.ndarray:
-        """Encode using BotAI persistent knowledge (fog-of-war independent).
+        """Encode using BotAI persistent knowledge + terrain awareness.
 
         Race-agnostic: uses UnitClassifier + BuildingClassifier to count
         workers, bases, production buildings, and air/ground composition
         regardless of which race the bot is playing.
+
+        Terrain: reads state.visibility, state.pathing_grid, state.terrain_height
+        to compute map coverage, terrain complexity, and cliff density.
         """
         self.economy.minerals = bot.minerals
         self.economy.vespene = bot.vespene
@@ -230,16 +245,112 @@ class SC2ObservationEncoder:
         self.military.air_count = len(air_units)
         self.military.ground_count = len(ground_units)
 
+        # ── Map control: our visible tiles / total walkable tiles ──
+        total_walkable = 1
+        our_visible = 0
+        try:
+            pathing = bot.state.pathing_grid
+            visibility = bot.state.visibility
+            if pathing is not None and visibility is not None:
+                pathing_arr = np.array(pathing, dtype=np.float32)
+                visibility_arr = np.array(visibility, dtype=np.float32)
+                total_walkable = max(1, int(np.sum(pathing_arr == 0)))
+                # Cells where we have visibility AND are walkable
+                our_visible = int(np.sum(
+                    (visibility_arr > 0) & (pathing_arr == 0)))
+                self.military.map_control = min(
+                    1.0, our_visible / total_walkable)
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+        # ── Terrain awareness from SC2 API ──
+        self._compute_terrain_metrics(bot)
+
         # ── Information from game state ──
+        enemy_count = len([u for u in bot.known_enemy_units
+                          if not u.is_structure])
+        self.information.enemy_known_ratio = min(
+            1.0, enemy_count / max(1, 20))
+        self.information.enemy_bases_known = len(bot.known_enemy_structures)
         self.information.uncertainty = max(
-            0.0, 1.0 - self.information.enemy_known_ratio
-        )
+            0.0, 1.0 - self.information.enemy_known_ratio)
 
         vec = self._build_vector()
         self._history.append(vec.copy())
         if len(self._history) > 100:
             self._history.pop(0)
         return vec
+
+    def _compute_terrain_metrics(self, bot: Any):
+        """Compute terrain complexity, cliff density, and visibility advantage.
+
+        Uses bot.state.pathing_grid, bot.state.terrain_height, and
+        bot.state.visibility — all available via BotAI.
+        """
+        try:
+            pathing = bot.state.pathing_grid
+            height = bot.state.terrain_height
+            visibility = bot.state.visibility
+
+            if pathing is None:
+                return
+
+            pathing_arr = np.array(pathing, dtype=np.float32)
+
+            # Terrain complexity: fraction of walkable map that is blocked
+            total_cells = pathing_arr.size
+            if total_cells > 0:
+                blocked = int(np.sum(pathing_arr != 0))
+                self.information.terrain_complexity = blocked / total_cells
+
+            # Cliff density: cells where height changes sharply
+            if height is not None:
+                height_arr = np.array(height, dtype=np.float32)
+                # Height difference between adjacent cells
+                dh_row = np.abs(np.diff(height_arr, axis=0))
+                dh_col = np.abs(np.diff(height_arr, axis=1))
+                # Cliff threshold: SC2 uses ~2.0 height units per cliff level
+                cliff_threshold = 1.5
+                cliff_cells = (
+                    int(np.sum(dh_row > cliff_threshold))
+                    + int(np.sum(dh_col > cliff_threshold))
+                )
+                # Normalize by total adjacent-cell pairs
+                max_pairs = (height_arr.shape[0] - 1) * height_arr.shape[1] + \
+                            height_arr.shape[0] * (height_arr.shape[1] - 1)
+                if max_pairs > 0:
+                    self.information.cliff_density = min(
+                        1.0, cliff_cells / max_pairs)
+
+            # Map revealed: fraction of walkable cells currently visible
+            if visibility is not None:
+                vis_arr = np.array(visibility, dtype=np.float32)
+                walkable = pathing_arr == 0
+                walkable_count = max(1, int(np.sum(walkable)))
+                visible_walkable = int(np.sum((vis_arr > 0) & walkable))
+                self.information.map_revealed = min(
+                    1.0, visible_walkable / walkable_count)
+
+                # Visibility advantage: our visible / (our + enemy estimated)
+                # Estimate enemy visibility from known enemy unit positions
+                enemy_vis_cells = 0
+                for eu in bot.known_enemy_units:
+                    try:
+                        ex, ey = int(eu.position.x), int(eu.position.y)
+                        if 0 <= ex < vis_arr.shape[0] and 0 <= ey < vis_arr.shape[1]:
+                            # Approximate enemy sight radius (~10 cells)
+                            r = 10
+                            x0, x1 = max(0, ex-r), min(vis_arr.shape[0], ex+r)
+                            y0, y1 = max(0, ey-r), min(vis_arr.shape[1], ey+r)
+                            enemy_vis_cells += int(np.sum(
+                                walkable[x0:x1, y0:y1]))
+                    except (AttributeError, IndexError):
+                        pass
+                total_vis = visible_walkable + max(1, enemy_vis_cells)
+                self.information.visibility_advantage = visible_walkable / total_vis
+
+        except (AttributeError, TypeError, ValueError):
+            pass
 
     def record_state_trace(self, tick: int, source: str = "unknown"):
         """Record current encoder state for layered telemetry."""

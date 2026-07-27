@@ -28,6 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
+import numpy as np
 
 from substrate_echo.embodiments.sc2.unit_classifier import (
     UnitClassifier, Role, Movement, AttackCapability,
@@ -169,6 +170,13 @@ class WorldState:
     current_tick: int = 0
     game_phase: str = "early"  # early, mid, late
 
+    # Terrain — from SC2 pathing_grid, terrain_height, visibility
+    map_revealed: float = 0.0        # fraction of walkable map visible to us
+    terrain_complexity: float = 0.0   # fraction of pathing grid blocked
+    cliff_density: float = 0.0        # fraction of cells with height discontinuity
+    cliff_traversable_count: int = 0  # our units that can cross cliffs
+    visibility_advantage: float = 0.5 # our visible tiles / (our + enemy visible)
+
     @classmethod
     def from_botai(cls, bot, tick: int = 0) -> 'WorldState':
         """Create from BotAI instance — fully race-agnostic."""
@@ -249,6 +257,74 @@ class WorldState:
                 if einfo and einfo.movement == Movement.AIR:
                     enemy_air += 1
 
+        # ── Cliff-traversable ground units ──
+        cliff_traversable = 0
+        for u in combat_units:
+            info = uc.classify(u)
+            if info and uc.has_cliff_traversal(info):
+                cliff_traversable += 1
+
+        # ── Terrain metrics from SC2 API ──
+        map_revealed = 0.0
+        terrain_complexity = 0.0
+        cliff_density = 0.0
+        visibility_advantage = 0.5
+
+        try:
+            pathing = bot.state.pathing_grid
+            height = bot.state.terrain_height
+            visibility = bot.state.visibility
+
+            if pathing is not None:
+                pathing_arr = np.array(pathing, dtype=np.float32)
+                total_cells = pathing_arr.size
+                if total_cells > 0:
+                    terrain_complexity = float(
+                        np.sum(pathing_arr != 0)) / total_cells
+
+                # Map revealed
+                if visibility is not None:
+                    vis_arr = np.array(visibility, dtype=np.float32)
+                    walkable = pathing_arr == 0
+                    walkable_count = max(1, int(np.sum(walkable)))
+                    visible_walkable = int(np.sum((vis_arr > 0) & walkable))
+                    map_revealed = min(1.0, visible_walkable / walkable_count)
+
+                    # Visibility advantage
+                    enemy_vis_cells = 0
+                    for eu in bot.known_enemy_units:
+                        try:
+                            ex = int(eu.position.x)
+                            ey = int(eu.position.y)
+                            r = 10
+                            x0, x1 = max(0, ex-r), min(vis_arr.shape[0], ex+r)
+                            y0, y1 = max(0, ey-r), min(vis_arr.shape[1], ey+r)
+                            enemy_vis_cells += int(np.sum(
+                                walkable[x0:x1, y0:y1]))
+                        except (IndexError, AttributeError):
+                            pass
+                    total_vis = visible_walkable + max(1, enemy_vis_cells)
+                    visibility_advantage = visible_walkable / total_vis
+
+            # Cliff density
+            if height is not None:
+                height_arr = np.array(height, dtype=np.float32)
+                dh_row = np.abs(np.diff(height_arr, axis=0))
+                dh_col = np.abs(np.diff(height_arr, axis=1))
+                cliff_threshold = 1.5
+                cliff_cells = (
+                    int(np.sum(dh_row > cliff_threshold))
+                    + int(np.sum(dh_col > cliff_threshold))
+                )
+                max_pairs = (
+                    (height_arr.shape[0] - 1) * height_arr.shape[1]
+                    + height_arr.shape[0] * (height_arr.shape[1] - 1))
+                if max_pairs > 0:
+                    cliff_density = min(1.0, cliff_cells / max_pairs)
+
+        except (AttributeError, TypeError, ValueError):
+            pass
+
         return cls(
             minerals=bot.minerals,
             vespene=bot.vespene,
@@ -268,6 +344,11 @@ class WorldState:
             game_phase=phase,
             mineral_fields=mineral_fields,
             gas_geysers=gas_geysers,
+            map_revealed=map_revealed,
+            terrain_complexity=terrain_complexity,
+            cliff_density=cliff_density,
+            cliff_traversable_count=cliff_traversable,
+            visibility_advantage=visibility_advantage,
         )
 
 
@@ -421,7 +502,7 @@ class AffordanceTracer:
                 # need_affinities provided by AffordanceModel (learned)
             ))
 
-        # Attack — adjusted by army composition vs enemy air
+        # Attack — adjusted by army composition and terrain
         if w.army_count >= 5:
             success = min(0.8, 0.3 + w.army_count * 0.01)
             risk = max(0.1, 0.5 - w.army_count * 0.01)
@@ -446,9 +527,31 @@ class AffordanceTracer:
             if w.enemy_air_count == 0 and w.dual_attack_count > 0:
                 success = min(0.9, success + 0.05)
 
+            # Terrain adjustment: high cliff density penalizes ground-only
+            # attacks, but cliff-traversable units bypass this penalty
+            if w.cliff_density > 0.1:
+                total_army = max(1, w.army_count)
+                cliff_ratio = w.cliff_traversable_count / total_army
+                if cliff_ratio < 0.2:
+                    # Mostly non-traversable army on cliff-heavy map
+                    success = max(0.1, success * (1.0 - w.cliff_density * 0.3))
+                    risk = min(0.9, risk + w.cliff_density * 0.1)
+                elif cliff_ratio > 0.5:
+                    # Good cliff traversal — terrain advantage
+                    success = min(0.95, success + w.cliff_density * 0.1)
+
+            # Visibility advantage: better vision = better attacks
+            if w.visibility_advantage > 0.6:
+                success = min(0.95, success + 0.05)
+            elif w.visibility_advantage < 0.3:
+                success = max(0.1, success * 0.8)
+                risk = min(0.9, risk + 0.1)
+
             desc = f"Attack with {w.army_count} units"
             if w.enemy_air_count > 0:
                 desc += f" (enemy air: {w.enemy_air_count}, our AA: {w.anti_air_count})"
+            if w.cliff_density > 0.1:
+                desc += f" (cliffs: {w.cliff_density:.0%}, traverse: {w.cliff_traversable_count})"
 
             candidates.append(AffordanceCandidate(
                 action_type=SC2ActionType.ATTACK,

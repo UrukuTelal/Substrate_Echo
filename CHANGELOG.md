@@ -2,6 +2,80 @@
 
 All notable changes to Substrate_Echo will be documented in this file.
 
+## [0.14.0] - 2026-07-26
+
+### Added — Representational Layer (shared semantic substrate)
+
+The Representational Layer is the foundation all subsystems reason over.
+It answers four questions about the same reality: What did I observe?
+What does it mean? What patterns are emerging? What should I do?
+
+**Ontology (representational/ontology.py):**
+- `Concept`: atoms of knowledge — what things are (unit, structure, terrain, strategy)
+- `TaxonomyNode`: is_a hierarchy enabling transitive reasoning (Marine → Unit → Entity)
+- `PropertySchema`: typed, bounded properties entities can have
+- `Rule`: causal relationships (condition → consequence) with confidence
+- `Constraint`: what cannot happen — shrinks search space dramatically
+- `Ontology`: unified static knowledge store with save/load
+
+**Entity Descriptor (representational/entity_descriptor.py):**
+- Universal cognitive object — everything reasoned about uses this structure
+- 13 sub-structures: Identity, Embodiment, Classification, Composition, Capabilities, Affordances, Relationships, State, Observations, Hypotheses, Evidence, Causality, History
+- Key distinction: Capabilities ≠ Affordances. Capabilities = what CAN it do. Affordances = what opportunities it CREATES
+- Evidence never overwritten by hypotheses — separate fields
+- Uncertainty always explicit — every field carries confidence
+- Full serialization roundtrip
+
+**State Graph (representational/state_graph.py):**
+- Dynamic entity tracking across ticks
+- Typed edges (enemy, allies, counters, adjacent_to) with confidence
+- Query methods: by role, taxonomy, capability, affordance, relationship
+- Graph traversal: neighbors, connected_by, counters_of
+- Persistence with save/load
+
+**Semantic Interpreter (representational/interpreter.py):**
+- Translates raw SC2 observations into EntityDescriptors
+- SC2 knowledge base: 15 unit types, 4 structure types with taxonomy, capabilities, affordances, counter relationships
+- Auto-populates Ontology on first use
+- Processes own units, enemy units, own structures, enemy structures
+- Updates StateGraph edges based on counter relationships
+- Generates terrain EntityDescriptor from computed metrics
+- Marks unseen entities with decaying confidence
+
+**Causal Graph (representational/causal_graph.py):**
+- Records events: unit created/destroyed/damaged/moved, structure events, resource changes, army engagements
+- Auto-generates consequences for high-impact events
+- Event indexing by tick and entity for fast queries
+- Temporal causality: get_causes() and get_effects()
+- Compression: old events summarized by significance
+
+**Frame System (representational/frames.py):**
+- 8 frame types: Danger, Opportunity, Uncertainty, Composition, Terrain, Temporal, Economic, ThreatAssessment
+- Each frame is a query over the world model answering a strategic question
+- 4 built-in Perspectives: EarlyGame, MidGame, UnderAttack, Attacking
+- Perspectives weight which frames dominate reasoning
+- Dynamic: perspective shifts based on game state
+
+**Narrative Layer (representational/narrative.py):**
+- Compresses causal event chains into temporal stories
+- Dramatic arc: Setup → Rising Action → Climax → Falling Action → Resolution
+- Auto-determines outcome from entity participation
+- Narrative types: Engagement, Economic, Strategic, Terrain, Composition, Scouting
+- Active narratives auto-close after 500 tick silence or complete arcs
+
+**SC2 Bot Integration (scripts/sc2_iterate_01.py):**
+- Imports all representational components
+- Constructor initializes Ontology, StateGraph, Interpreter, CausalGraph, FrameSystem, NarrativeLayer
+- on_step: every 3 ticks — interpret game state, record causal events, select perspective, update narratives
+- `_record_causal_events()`: tracks army/worker/base deltas as causal events
+- `_select_perspective()`: early/mid/under_attack/attacking based on threat ratio
+- on_end: saves state_graph.json, causal_graph.json, narratives.json; prints all summaries
+
+**Tests:**
+- 37 new tests in `tests/test_representational.py`
+- Full coverage: Ontology, EntityDescriptor, StateGraph, CausalGraph, FrameSystem, NarrativeLayer, SemanticInterpreter
+- 835 tests passing total (798 original + 37 new)
+
 ## [0.13.0] - 2026-07-25
 
 ### Added — TacticalBrain + ReplayAuditor

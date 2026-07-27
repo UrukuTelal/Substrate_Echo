@@ -574,7 +574,7 @@ class TacticalBrain:
 
         battle = {
             "tick": tick,
-            "our_composition": {s.name for s in prev.own_units if s.is_alive and s.can_attack},
+            "our_composition": {s.name: 1 for s in prev.own_units if s.is_alive and s.can_attack},
             "our_units_lost": lost_units,
             "enemy_composition": enemy_comp,
             "enemy_units_lost": lost_enemy,

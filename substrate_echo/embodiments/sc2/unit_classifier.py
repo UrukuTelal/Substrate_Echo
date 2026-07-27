@@ -27,6 +27,22 @@ class Movement(Enum):
     AIR = "air"
 
 
+class TerrainTraversal(Enum):
+    """How a ground unit interacts with cliffs and terrain obstacles.
+
+    CLIFF_NONE:   Cannot cross cliffs (most ground units)
+    CLIFF_JUMP:   Can jump up/down cliffs (Reaper, Zealot with charge)
+    CLIFF_WALK:   Walks along cliff edges, not blocked by terrain (Colossus)
+    AIR:          Ignores all terrain (flying units)
+    BURROW:       Can move underground, ignoring surface terrain (Zerg burrow)
+    """
+    NONE = "none"
+    CLIFF_JUMP = "cliff_jump"
+    CLIFF_WALK = "cliff_walk"
+    AIR = "air"
+    BURROW = "burrow"
+
+
 class UnitType(Enum):
     INFANTRY = "infantry"
     VEHICLE = "vehicle"
@@ -79,6 +95,7 @@ class UnitInfo:
     cost_gas: int = 0
     supply: int = 0
     tags: Set[str] = field(default_factory=set)  # misc keywords
+    terrain_traversal: TerrainTraversal = TerrainTraversal.NONE
 
 
 # ── Full SC2 Unit Database ──────────────────────────────────────
@@ -112,24 +129,29 @@ _ZERG: Dict[str, UnitInfo] = {
     "Mutalisk":    UnitInfo("Mutalisk",    Movement.AIR,    UnitType.INFANTRY, CombatClass.RANGED,
                             attack_caps={AttackCapability.AVG, AttackCapability.AVA},
                             behaviors={Behavior.ATTACK}, roles={Role.ARMY, Role.SCOUT},
-                            cost_minerals=100, cost_gas=100, supply=2),
+                            cost_minerals=100, cost_gas=100, supply=2,
+                            terrain_traversal=TerrainTraversal.AIR),
     "CORRUPTOR":   UnitInfo("Corruptor",   Movement.AIR,    UnitType.INFANTRY, CombatClass.RANGED,
                             attack_caps={AttackCapability.AVA, AttackCapability.AVG},
                             behaviors={Behavior.ATTACK}, roles={Role.ARMY},
-                            cost_minerals=150, cost_gas=100, supply=2, tags={"armored"}),
+                            cost_minerals=150, cost_gas=100, supply=2, tags={"armored"},
+                            terrain_traversal=TerrainTraversal.AIR),
     "ULTRALISK":   UnitInfo("Ultralisk",   Movement.GROUND, UnitType.VEHICLE, CombatClass.MELEE,
                             attack_caps={AttackCapability.GVG}, behaviors={Behavior.ATTACK},
                             roles={Role.ARMY}, cost_minerals=300, cost_gas=200, supply=6,
                             tags={"massive", "armored"}),
     "VIPER":       UnitInfo("Viper",       Movement.AIR,    UnitType.INFANTRY, CombatClass.SPELL,
                             behaviors={Behavior.CAST}, roles={Role.SUPPORT},
-                            cost_minerals=100, cost_gas=200, supply=2),
+                            cost_minerals=100, cost_gas=200, supply=2,
+                            terrain_traversal=TerrainTraversal.AIR),
     "OVERLORD":    UnitInfo("Overlord",    Movement.AIR,    UnitType.VEHICLE, CombatClass.NONE,
                             behaviors={Behavior.SUPPLY}, roles={Role.SUPPORT},
-                            cost_minerals=100, supply=0, tags={"supply"}),
+                            cost_minerals=100, supply=0, tags={"supply"},
+                            terrain_traversal=TerrainTraversal.AIR),
     "OVERSEER":    UnitInfo("Overseer",    Movement.AIR,    UnitType.VEHICLE, CombatClass.NONE,
                             behaviors={Behavior.SUPPLY, Behavior.CAST}, roles={Role.SCOUT, Role.SUPPORT},
-                            cost_minerals=50, cost_gas=50, supply=0),
+                            cost_minerals=50, cost_gas=50, supply=0,
+                            terrain_traversal=TerrainTraversal.AIR),
     "QUEEN":       UnitInfo("Queen",       Movement.GROUND, UnitType.INFANTRY, CombatClass.RANGED,
                             attack_caps={AttackCapability.GVG, AttackCapability.GVA},
                             behaviors={Behavior.DEFEND, Behavior.CAST}, roles={Role.SUPPORT, Role.ARMY},
@@ -157,7 +179,8 @@ _TERRAN: Dict[str, UnitInfo] = {
                                  tags={"armored", "light"}),
     "REAPER":           UnitInfo("Reaper",           Movement.GROUND, UnitType.INFANTRY, CombatClass.RANGED,
                                  attack_caps={AttackCapability.GVG}, behaviors={Behavior.ATTACK, Behavior.SCOUT},
-                                 roles={Role.ARMY, Role.SCOUT}, cost_minerals=50, cost_gas=50, supply=1),
+                                 roles={Role.ARMY, Role.SCOUT}, cost_minerals=50, cost_gas=50, supply=1,
+                                 terrain_traversal=TerrainTraversal.CLIFF_JUMP),
     "HELLION":          UnitInfo("Hellion",          Movement.GROUND, UnitType.VEHICLE, CombatClass.RANGED,
                                  attack_caps={AttackCapability.GVG}, behaviors={Behavior.ATTACK},
                                  roles={Role.ARMY}, cost_minerals=100, supply=2, tags={"light", "splash"}),
@@ -180,22 +203,26 @@ _TERRAN: Dict[str, UnitInfo] = {
     "VIKING_F":         UnitInfo("Viking (air)",     Movement.AIR,    UnitType.VEHICLE, CombatClass.RANGED,
                                  attack_caps={AttackCapability.AVA, AttackCapability.AVG},
                                  behaviors={Behavior.ATTACK}, roles={Role.ARMY},
-                                 cost_minerals=150, cost_gas=75, supply=2),
+                                 cost_minerals=150, cost_gas=75, supply=2,
+                                 terrain_traversal=TerrainTraversal.AIR),
     "VIKING_G":         UnitInfo("Viking (ground)",  Movement.GROUND, UnitType.VEHICLE, CombatClass.RANGED,
                                  attack_caps={AttackCapability.GVG},
                                  behaviors={Behavior.ATTACK}, roles={Role.ARMY},
                                  cost_minerals=150, cost_gas=75, supply=2),
     "MEDIVAC":          UnitInfo("Medivac",          Movement.AIR,    UnitType.VEHICLE, CombatClass.NONE,
                                  behaviors={Behavior.TRANSPORT}, roles={Role.SUPPORT},
-                                 cost_minerals=100, cost_gas=100, supply=2),
+                                 cost_minerals=100, cost_gas=100, supply=2,
+                                 terrain_traversal=TerrainTraversal.AIR),
     "LIBERATOR":        UnitInfo("Liberator",        Movement.AIR,    UnitType.VEHICLE, CombatClass.RANGED,
                                  attack_caps={AttackCapability.AVG, AttackCapability.AVA},
                                  behaviors={Behavior.ATTACK}, roles={Role.ARMY},
-                                 cost_minerals=150, cost_gas=150, supply=3),
+                                 cost_minerals=150, cost_gas=150, supply=3,
+                                 terrain_traversal=TerrainTraversal.AIR),
     "BATTLECRUISER":    UnitInfo("Battlecruiser",    Movement.AIR,    UnitType.VEHICLE, CombatClass.RANGED,
                                  attack_caps={AttackCapability.AVG, AttackCapability.AVA, AttackCapability.GVG},
                                  behaviors={Behavior.ATTACK, Behavior.CAST}, roles={Role.ARMY},
-                                 cost_minerals=400, cost_gas=300, supply=6, tags={"massive", "armored"}),
+                                 cost_minerals=400, cost_gas=300, supply=6, tags={"massive", "armored"},
+                                 terrain_traversal=TerrainTraversal.AIR),
     "GHOST":            UnitInfo("Ghost",            Movement.GROUND, UnitType.INFANTRY, CombatClass.SPELL,
                                  attack_caps={AttackCapability.GVG, AttackCapability.GVA},
                                  behaviors={Behavior.ATTACK, Behavior.CAST}, roles={Role.ARMY, Role.SUPPORT},
@@ -216,7 +243,8 @@ _PROTOSS: Dict[str, UnitInfo] = {
     "STALKER":      UnitInfo("Stalker",      Movement.GROUND, UnitType.VEHICLE, CombatClass.RANGED,
                              attack_caps={AttackCapability.GVG, AttackCapability.GVA},
                              behaviors={Behavior.ATTACK}, roles={Role.ARMY},
-                             cost_minerals=125, cost_gas=50, supply=2, tags={"armored"}),
+                             cost_minerals=125, cost_gas=50, supply=2, tags={"armored"},
+                             terrain_traversal=TerrainTraversal.CLIFF_JUMP),
     "SENTRY":       UnitInfo("Sentry",       Movement.GROUND, UnitType.VEHICLE, CombatClass.SPELL,
                              attack_caps={AttackCapability.GVG}, behaviors={Behavior.CAST},
                              roles={Role.SUPPORT}, cost_minerals=50, cost_gas=100, supply=2),
@@ -225,7 +253,8 @@ _PROTOSS: Dict[str, UnitInfo] = {
                              roles={Role.ARMY}, cost_minerals=100, cost_gas=25, supply=2),
     "OBSERVER":     UnitInfo("Observer",     Movement.AIR,    UnitType.VEHICLE, CombatClass.NONE,
                              behaviors={Behavior.CAST}, roles={Role.SCOUT, Role.SUPPORT},
-                             cost_minerals=25, cost_gas=75, supply=1),
+                             cost_minerals=25, cost_gas=75, supply=1,
+                             terrain_traversal=TerrainTraversal.AIR),
     "IMMORTAL":     UnitInfo("Immortal",     Movement.GROUND, UnitType.VEHICLE, CombatClass.RANGED,
                              attack_caps={AttackCapability.GVG}, behaviors={Behavior.ATTACK},
                              roles={Role.ARMY}, cost_minerals=250, cost_gas=100, supply=4,
@@ -233,29 +262,35 @@ _PROTOSS: Dict[str, UnitInfo] = {
     "COLOSSUS":     UnitInfo("Colossus",     Movement.GROUND, UnitType.VEHICLE, CombatClass.RANGED,
                              attack_caps={AttackCapability.GVG}, behaviors={Behavior.ATTACK},
                              roles={Role.ARMY}, cost_minerals=300, cost_gas=200, supply=6,
-                             tags={"massive", "armored", "splash"}),
+                             tags={"massive", "armored", "splash"},
+                             terrain_traversal=TerrainTraversal.CLIFF_WALK),
     "DISRUPTOR":    UnitInfo("Disruptor",    Movement.GROUND, UnitType.VEHICLE, CombatClass.SPELL,
                              attack_caps={AttackCapability.GVG}, behaviors={Behavior.ATTACK, Behavior.CAST},
                              roles={Role.ARMY}, cost_minerals=150, cost_gas=150, supply=3),
     "PHOENIX":      UnitInfo("Phoenix",      Movement.AIR,    UnitType.VEHICLE, CombatClass.RANGED,
                              attack_caps={AttackCapability.AVA, AttackCapability.AVG},
                              behaviors={Behavior.ATTACK}, roles={Role.ARMY, Role.SCOUT},
-                             cost_minerals=150, cost_gas=100, supply=2),
+                             cost_minerals=150, cost_gas=100, supply=2,
+                             terrain_traversal=TerrainTraversal.AIR),
     "VOID_RAY":     UnitInfo("VoidRay",      Movement.AIR,    UnitType.VEHICLE, CombatClass.RANGED,
                              attack_caps={AttackCapability.AVA, AttackCapability.AVG},
                              behaviors={Behavior.ATTACK}, roles={Role.ARMY},
-                             cost_minerals=250, cost_gas=150, supply=4, tags={"armored"}),
+                             cost_minerals=250, cost_gas=150, supply=4, tags={"armored"},
+                             terrain_traversal=TerrainTraversal.AIR),
     "ORACLE":       UnitInfo("Oracle",       Movement.AIR,    UnitType.VEHICLE, CombatClass.SPELL,
                              attack_caps={AttackCapability.AVG}, behaviors={Behavior.CAST, Behavior.ATTACK},
-                             roles={Role.SUPPORT, Role.SCOUT}, cost_minerals=150, cost_gas=150, supply=3),
+                             roles={Role.SUPPORT, Role.SCOUT}, cost_minerals=150, cost_gas=150, supply=3,
+                             terrain_traversal=TerrainTraversal.AIR),
     "TEMPEST":      UnitInfo("Tempest",      Movement.AIR,    UnitType.VEHICLE, CombatClass.RANGED,
                              attack_caps={AttackCapability.AVA, AttackCapability.AVG},
                              behaviors={Behavior.ATTACK}, roles={Role.ARMY},
-                             cost_minerals=300, cost_gas=250, supply=5, tags={"massive", "armored"}),
+                             cost_minerals=300, cost_gas=250, supply=5, tags={"massive", "armored"},
+                             terrain_traversal=TerrainTraversal.AIR),
     "CARRIER":      UnitInfo("Carrier",      Movement.AIR,    UnitType.VEHICLE, CombatClass.RANGED,
                              attack_caps={AttackCapability.AVA, AttackCapability.AVG},
                              behaviors={Behavior.ATTACK}, roles={Role.ARMY},
-                             cost_minerals=350, cost_gas=250, supply=6, tags={"massive", "armored"}),
+                             cost_minerals=350, cost_gas=250, supply=6, tags={"massive", "armored"},
+                             terrain_traversal=TerrainTraversal.AIR),
     "HIGH_TEMPLAR": UnitInfo("HighTemplar",  Movement.GROUND, UnitType.INFANTRY, CombatClass.SPELL,
                              behaviors={Behavior.CAST}, roles={Role.SUPPORT},
                              cost_minerals=50, cost_gas=150, supply=2),
@@ -343,6 +378,7 @@ class UnitClassifier:
         return UnitInfo(
             name=name, movement=movement, unit_type=unit_type,
             combat=combat, attack_caps=attack_caps, roles=roles,
+            terrain_traversal=TerrainTraversal.AIR if is_flying else TerrainTraversal.NONE,
         )
 
     def filter_by_role(self, units: Any, role: Role) -> List[Any]:
@@ -488,4 +524,43 @@ class UnitClassifier:
                 counts["ground_only"] += 1
             else:
                 counts["no_attack"] += 1
+        return counts
+
+    # ── Terrain Traversal Helpers ──────────────────────────────────
+
+    def filter_by_traversal(self, units: Any,
+                            traversal: TerrainTraversal) -> List[Any]:
+        """Filter units with a specific terrain traversal capability."""
+        result = []
+        for unit in units:
+            info = self.classify(unit)
+            if info and info.terrain_traversal == traversal:
+                result.append(unit)
+        return result
+
+    def has_cliff_traversal(self, info: UnitInfo) -> bool:
+        """True if unit can traverse cliffs (jump or walk)."""
+        return info.terrain_traversal in (
+            TerrainTraversal.CLIFF_JUMP, TerrainTraversal.CLIFF_WALK)
+
+    def filter_cliff_traversable(self, units: Any) -> List[Any]:
+        """Filter ground units that can cross cliffs."""
+        result = []
+        for unit in units:
+            info = self.classify(unit)
+            if info and self.has_cliff_traversal(info):
+                result.append(unit)
+        return result
+
+    def count_by_traversal(self, units: Any) -> Dict[str, int]:
+        """Count units by terrain traversal category."""
+        counts = {"none": 0, "cliff_jump": 0, "cliff_walk": 0,
+                  "air": 0, "burrow": 0}
+        for unit in units:
+            info = self.classify(unit)
+            if info:
+                key = info.terrain_traversal.value
+                counts[key] = counts.get(key, 0) + 1
+            else:
+                counts["none"] += 1
         return counts

@@ -1402,6 +1402,82 @@ Unit tests verify components. SC2 playthroughs verify the architecture.
 
 ---
 
+## Phase S20: Representational Layer — COMPLETE ✓
+
+### Overview
+
+The shared semantic substrate all subsystems reason over. Four representations
+of the same reality, each answering a different question:
+
+| Representation | Question | Component |
+|---------------|----------|-----------|
+| Perceptual | What did I observe? | SemanticInterpreter |
+| Semantic | What does it mean? | Ontology, EntityDescriptor |
+| Dynamical | What patterns are emerging? | CausalGraph, NarrativeLayer |
+| Executive | What should I do? | FrameSystem, Perspectives |
+
+### Architecture
+
+```
+Raw SC2 Observation
+        |
+        v
+SemanticInterpreter ──→ EntityDescriptors (per unit/structure)
+        |                       |
+        v                       v
+   StateGraph ◄──────── Entity Relationships
+        |
+        v
+   FrameSystem ──→ Danger / Opportunity / Uncertainty / Composition / Terrain
+        |              |
+        v              v
+   Perspective ──→ Weighted frame results → Governance → Action
+        |
+        v
+   CausalGraph ──→ Event Chains ──→ NarrativeLayer ──→ Stories
+```
+
+### Key Design Decisions
+
+1. **Ontology lives AROUND the kernel, not inside it.** The kernel is substrate-agnostic.
+2. **EntityDescriptor is the universal cognitive object.** Units, terrain, resources, strategies — all use the same structure.
+3. **Capabilities ≠ Affordances.** Capabilities = what CAN it do. Affordances = what opportunities it CREATES.
+4. **Evidence never overwritten by hypotheses.** Separate fields, always.
+5. **Uncertainty always explicit.** Every field carries confidence.
+6. **Frames are queries**, not static templates. "What could kill me?" is a dynamic query.
+7. **Perspectives shift over time.** Early game = economic frames dominate. Under attack = danger frame dominates.
+
+### Components
+
+| Component | File | Purpose | Status |
+|-----------|------|---------|--------|
+| Ontology | `representational/ontology.py` | Concepts, taxonomy, rules, constraints | ✓ |
+| EntityDescriptor | `representational/entity_descriptor.py` | Universal cognitive object (13 sub-structures) | ✓ |
+| StateGraph | `representational/state_graph.py` | Dynamic entity tracking with edges | ✓ |
+| SemanticInterpreter | `representational/interpreter.py` | Raw obs → EntityDescriptors, SC2 knowledge base | ✓ |
+| CausalGraph | `representational/causal_graph.py` | Event chains + auto-consequences | ✓ |
+| FrameSystem | `representational/frames.py` | 8 frame types, 4 perspectives | ✓ |
+| NarrativeLayer | `representational/narrative.py` | Event chains → temporal stories | ✓ |
+| Tests | `tests/test_representational.py` | 37 tests, all passing | ✓ |
+
+### SC2 Knowledge Base
+
+Interpreter includes static knowledge for 15 unit types and 4 structure types:
+- Taxonomy, capabilities, affordances, counter relationships
+- Auto-populates Ontology on first use
+- All three races: Terran (Marine, Marauder, Reaper, SiegeTank, Medivac, SCV), Zerg (Zergling, Roach, Mutalisk, Drone, Overlord), Protoss (Probe, Pylon, Nexus)
+
+### Integration
+
+Wired into `sc2_iterate_01.py`:
+- on_step: interpret_tick every 3 ticks, record causal events, select perspective, update narratives
+- on_end: save state_graph.json, causal_graph.json, narratives.json
+- Perspective auto-selection based on threat ratio
+
+### Status**: COMPLETE ✓
+
+---
+
 ## Phase S21: Epistemic Curiosity (Active Knowledge Acquisition)
 
 **Goal**: The swarm generates its own research agenda based on knowledge gaps and impact assessment.

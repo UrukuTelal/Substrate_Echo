@@ -4,19 +4,33 @@ Records every tick's state during a game and produces an audit report
 identifying: supply blocks, idle production, economy stalls, army
 inaction, composition mismatches, unit losses, and action degeneration.
 
+The auditor also populates an EpistemicLedger with evidence — raw
+observations of capabilities used and strategy outcomes.  The ledger
+is pure memory; it never recommends or decides.  Other systems
+(Strategy Council, Capability Council) read the ledger and reason.
+
 Architecture:
-    TickSnapshot   — one frame of game state (units, resources, supply, actions)
-    FailurePoint   — a detected issue with tick, severity, category, description
-    AuditReport    — full game analysis with failure points, timeline, summary
-    ReplayAuditor  — records ticks, detects failures, produces report
+    TickSnapshot         — one frame of game state
+    FailurePoint         — a detected issue
+    AuditReport          — full game failure analysis
+    EvidenceEntry        — a single raw observation
+    ConfidenceRecord     — raw evidence counts (wins/losses/draws), not averages
+    StrategyContext      — structured context snapshot for hypothesis evaluation
+    Capability           — a discovered affordance (what the bot CAN do)
+    StrategyHypothesis   — a testable strategy claim with evidence
+    EpistemicLedger      — cross-game hierarchical memory
+    ReplayAuditor        — records ticks, detects failures, populates ledger
 
 Usage in bot:
     auditor = ReplayAuditor()
+    ledger = EpistemicLedger()
     # Each tick:
     auditor.record_tick(tick, bot, action_type)
     # Game end:
     report = auditor.analyze(game_result)
     report.print_summary()
+    ledger.end_game(...)
+    ledger.save(path)
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -47,6 +61,398 @@ class Severity(Enum):
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
+
+
+@dataclass
+class EvidenceEntry:
+    """A single raw evidence observation. Never edited after creation."""
+    tick: int
+    game_number: int
+    observation_type: str  # "produced", "engaged", "terrain_used", "economic", "counter"
+    data: Dict[str, Any] = field(default_factory=dict)
+    outcome: str = ""  # "won", "lost", "inconclusive", ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "tick": self.tick,
+            "game_number": self.game_number,
+            "observation_type": self.observation_type,
+            "data": self.data,
+            "outcome": self.outcome,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "EvidenceEntry":
+        return cls(**d)
+
+
+@dataclass
+class ConfidenceRecord:
+    """Tracks confidence for any learned thing. Stores raw evidence, not averages."""
+    sample_count: int = 0
+    wins: int = 0
+    losses: int = 0
+    draws: int = 0
+    confidence: float = 0.0
+    variance: float = 0.0
+    last_seen_tick: int = 0
+    last_seen_game: int = 0
+    last_success_tick: int = 0
+
+    def record_outcome(self, outcome: str, tick: int, game_number: int) -> None:
+        self.sample_count += 1
+        self.last_seen_tick = tick
+        self.last_seen_game = game_number
+        if outcome == "won":
+            self.wins += 1
+            self.last_success_tick = tick
+        elif outcome == "lost":
+            self.losses += 1
+        elif outcome == "inconclusive":
+            self.draws += 1
+        self._recompute()
+
+    def _recompute(self) -> None:
+        decided = self.wins + self.losses
+        if decided > 0:
+            self.confidence = self.wins / decided
+            p = self.confidence
+            self.variance = p * (1.0 - p) / decided
+        else:
+            self.confidence = 0.0
+            self.variance = 0.0
+
+    def decay(self, factor: float = 0.999) -> None:
+        """Apply forgetting decay. Called once per game."""
+        self.confidence *= factor
+        self.variance *= factor
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "sample_count": self.sample_count,
+            "wins": self.wins,
+            "losses": self.losses,
+            "draws": self.draws,
+            "confidence": round(self.confidence, 6),
+            "variance": round(self.variance, 8),
+            "last_seen_tick": self.last_seen_tick,
+            "last_seen_game": self.last_seen_game,
+            "last_success_tick": self.last_success_tick,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ConfidenceRecord":
+        return cls(**{k: d.get(k, v) for k, v in {
+            "sample_count": 0, "wins": 0, "losses": 0, "draws": 0,
+            "confidence": 0.0, "variance": 0.0,
+            "last_seen_tick": 0, "last_seen_game": 0, "last_success_tick": 0,
+        }.items()})
+
+
+@dataclass
+class StrategyContext:
+    """Structured context snapshot when a strategy is evaluated."""
+    tick: int = 0
+    army_value: float = 0.0
+    army_count: int = 0
+    worker_count: int = 0
+    base_count: int = 0
+    minerals: int = 0
+    vespene: int = 0
+    supply_used: int = 0
+    supply_cap: int = 0
+    enemy_visible: int = 0
+    enemy_army_value: float = 0.0
+    terrain_complexity: float = 0.0
+    cliff_density: float = 0.0
+    visibility_advantage: float = 0.0
+    tech_level: int = 0
+    pressure_level: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {k: round(v, 4) if isinstance(v, float) else v
+                for k, v in self.__dict__.items()}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "StrategyContext":
+        return cls(**{k: d.get(k, v) for k, v in cls().__dict__.items()})
+
+
+@dataclass
+class Capability:
+    """A discovered affordance — what the bot CAN do.
+
+    Capabilities are distinct from strategies. A capability is an affordance
+    (can cliff jump, can produce ranged units). A strategy is a sequencing
+    decision that uses capabilities (attack after enemy moves out).
+    """
+    name: str
+    category: str  # "unit", "structure", "terrain", "tactic", "economic"
+    enables: List[str] = field(default_factory=list)
+    first_seen_tick: int = 0
+    last_seen_tick: int = 0
+    games_observed: int = 0
+    confidence: Optional[ConfidenceRecord] = None
+    evidence: List[EvidenceEntry] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "category": self.category,
+            "enables": self.enables,
+            "first_seen_tick": self.first_seen_tick,
+            "last_seen_tick": self.last_seen_tick,
+            "games_observed": self.games_observed,
+            "confidence": self.confidence.to_dict() if self.confidence else None,
+            "evidence": [e.to_dict() for e in self.evidence[-50:]],
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "Capability":
+        cr = ConfidenceRecord.from_dict(d["confidence"]) if d.get("confidence") else None
+        ev = [EvidenceEntry.from_dict(e) for e in d.get("evidence", [])]
+        return cls(
+            name=d["name"],
+            category=d["category"],
+            enables=d.get("enables", []),
+            first_seen_tick=d.get("first_seen_tick", 0),
+            last_seen_tick=d.get("last_seen_tick", 0),
+            games_observed=d.get("games_observed", 0),
+            confidence=cr,
+            evidence=ev,
+        )
+
+
+@dataclass
+class StrategyHypothesis:
+    """A hypothesis about what strategy might work.
+
+    Not a conclusion. A testable claim with structured evidence
+    that other systems (Strategy Council) can reason about.
+    """
+    name: str
+    description: str = ""
+    capabilities_used: List[str] = field(default_factory=list)
+    context: Optional[StrategyContext] = None
+    confidence: Optional[ConfidenceRecord] = None
+    evidence: List[EvidenceEntry] = field(default_factory=list)
+    counterexamples: List[EvidenceEntry] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "capabilities_used": self.capabilities_used,
+            "context": self.context.to_dict() if self.context else None,
+            "confidence": self.confidence.to_dict() if self.confidence else None,
+            "evidence": [e.to_dict() for e in self.evidence[-50:]],
+            "counterexamples": [e.to_dict() for e in self.counterexamples[-20:]],
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "StrategyHypothesis":
+        ctx = StrategyContext.from_dict(d["context"]) if d.get("context") else None
+        cr = ConfidenceRecord.from_dict(d["confidence"]) if d.get("confidence") else None
+        ev = [EvidenceEntry.from_dict(e) for e in d.get("evidence", [])]
+        ce = [EvidenceEntry.from_dict(e) for e in d.get("counterexamples", [])]
+        return cls(
+            name=d["name"],
+            description=d.get("description", ""),
+            capabilities_used=d.get("capabilities_used", []),
+            context=ctx,
+            confidence=cr,
+            evidence=ev,
+            counterexamples=ce,
+        )
+
+
+class EpistemicLedger:
+    """Cross-game epistemic memory. Records, measures, summarizes, indexes.
+
+    Does NOT decide. Does NOT recommend. Other systems read this and reason.
+
+    Hierarchical: Ledger -> Capabilities / Affordances / StrategyHypotheses
+    -> Evidence -> Confidence.
+
+    Persistence via JSON. Forgetting via confidence decay per game.
+    """
+
+    def __init__(self):
+        self.capabilities: Dict[str, Capability] = {}
+        self.strategy_hypotheses: Dict[str, StrategyHypothesis] = {}
+        self.game_summaries: List[Dict[str, Any]] = []
+        self._current_game: int = 0
+
+    def begin_game(self, game_number: int) -> None:
+        """Mark the start of a new game. Applies decay to all confidence."""
+        self._current_game = game_number
+        for cap in self.capabilities.values():
+            if cap.confidence:
+                cap.confidence.decay()
+        for hyp in self.strategy_hypotheses.values():
+            if hyp.confidence:
+                hyp.confidence.decay()
+
+    def observe_capability(self, name: str, category: str, tick: int,
+                           enables: Optional[List[str]] = None,
+                           evidence_data: Optional[Dict[str, Any]] = None) -> None:
+        """Record that a capability was observed in use."""
+        key = f"{category}:{name.upper()}"
+        if key not in self.capabilities:
+            self.capabilities[key] = Capability(
+                name=name.upper(),
+                category=category,
+                enables=enables or [],
+                first_seen_tick=tick,
+                last_seen_tick=tick,
+                games_observed=1,
+                confidence=ConfidenceRecord(),
+                evidence=[],
+            )
+        else:
+            cap = self.capabilities[key]
+            cap.last_seen_tick = tick
+            if enables:
+                for e in enables:
+                    if e not in cap.enables:
+                        cap.enables.append(e)
+
+        ev = EvidenceEntry(
+            tick=tick,
+            game_number=self._current_game,
+            observation_type="produced",
+            data=evidence_data or {"capability": name},
+        )
+        self.capabilities[key].evidence.append(ev)
+        self.capabilities[key].confidence.record_outcome("", tick, self._current_game)
+
+    def add_hypothesis(self, name: str, description: str = "",
+                       capabilities_used: Optional[List[str]] = None,
+                       context: Optional[StrategyContext] = None) -> StrategyHypothesis:
+        """Create or retrieve a strategy hypothesis."""
+        if name not in self.strategy_hypotheses:
+            self.strategy_hypotheses[name] = StrategyHypothesis(
+                name=name,
+                description=description,
+                capabilities_used=capabilities_used or [],
+                context=context,
+                confidence=ConfidenceRecord(),
+                evidence=[],
+                counterexamples=[],
+            )
+        return self.strategy_hypotheses[name]
+
+    def record_hypothesis_outcome(self, name: str, outcome: str, tick: int,
+                                  evidence_data: Optional[Dict[str, Any]] = None,
+                                  context: Optional[StrategyContext] = None) -> None:
+        """Record an outcome for a strategy hypothesis.
+
+        Does not judge. Just stores the evidence.
+        """
+        if name not in self.strategy_hypotheses:
+            self.add_hypothesis(name, context=context)
+        hyp = self.strategy_hypotheses[name]
+        ev = EvidenceEntry(
+            tick=tick,
+            game_number=self._current_game,
+            observation_type="engaged",
+            data=evidence_data or {},
+            outcome=outcome,
+        )
+        hyp.evidence.append(ev)
+        hyp.confidence.record_outcome(outcome, tick, self._current_game)
+        if context:
+            hyp.context = context
+
+        # Counterexamples: losses with strong context
+        if outcome == "lost":
+            hyp.counterexamples.append(ev)
+
+    def end_game(self, game_number: int, result: str, tick_count: int,
+                 capabilities_used: Optional[List[str]] = None) -> None:
+        """Finalize a game. Record summary and mark capabilities observed."""
+        for cap_name in (capabilities_used or []):
+            key_match = [k for k in self.capabilities if k.endswith(f":{cap_name.upper()}")]
+            for k in key_match:
+                self.capabilities[k].games_observed += 1
+
+        self.game_summaries.append({
+            "game_number": game_number,
+            "result": result,
+            "tick_count": tick_count,
+            "capabilities_tracked": len(self.capabilities),
+            "hypotheses_tracked": len(self.strategy_hypotheses),
+        })
+
+    def get_capability(self, name: str, category: str = "") -> Optional[Capability]:
+        key = f"{category}:{name.upper()}" if category else None
+        if key and key in self.capabilities:
+            return self.capabilities[key]
+        for k, v in self.capabilities.items():
+            if k.endswith(f":{name.upper()}"):
+                return v
+        return None
+
+    def get_hypothesis(self, name: str) -> Optional[StrategyHypothesis]:
+        return self.strategy_hypotheses.get(name)
+
+    def top_hypotheses(self, n: int = 10) -> List[StrategyHypothesis]:
+        ranked = sorted(
+            self.strategy_hypotheses.values(),
+            key=lambda h: h.confidence.confidence if h.confidence else 0,
+            reverse=True,
+        )
+        return ranked[:n]
+
+    def summary_text(self) -> str:
+        lines = ["=== EPISTEMIC LEDGER ==="]
+        lines.append(f"  Capabilities tracked: {len(self.capabilities)}")
+        cats: Dict[str, int] = {}
+        for cap in self.capabilities.values():
+            cats[cap.category] = cats.get(cap.category, 0) + 1
+        for cat, count in sorted(cats.items()):
+            lines.append(f"    {cat}: {count}")
+
+        lines.append(f"  Strategy hypotheses: {len(self.strategy_hypotheses)}")
+        decided = [h for h in self.strategy_hypotheses.values()
+                   if h.confidence and h.confidence.sample_count >= 3]
+        if decided:
+            best = sorted(decided, key=lambda h: h.confidence.confidence, reverse=True)[:5]
+            lines.append(f"    Top hypotheses (3+ samples):")
+            for h in best:
+                c = h.confidence
+                lines.append(f"      {h.name}: {c.confidence:.1%} "
+                             f"({c.wins}W/{c.losses}L/{c.draws}D, n={c.sample_count})")
+        return "\n".join(lines)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "capabilities": {k: v.to_dict() for k, v in self.capabilities.items()},
+            "strategy_hypotheses": {k: v.to_dict() for k, v in self.strategy_hypotheses.items()},
+            "game_summaries": self.game_summaries[-100:],
+        }
+
+    def load(self, path: str) -> None:
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            self.capabilities = {
+                k: Capability.from_dict(v)
+                for k, v in data.get("capabilities", {}).items()
+            }
+            self.strategy_hypotheses = {
+                k: StrategyHypothesis.from_dict(v)
+                for k, v in data.get("strategy_hypotheses", {}).items()
+            }
+            self.game_summaries = data.get("game_summaries", [])
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+    def save(self, path: str) -> None:
+        import os
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(self.to_dict(), f, indent=2)
 
 
 @dataclass
@@ -280,6 +686,56 @@ class ReplayAuditor:
 
         self._prev_army_count = snap.army_count
         self._prev_worker_count = snap.worker_count
+
+    def populate_ledger(self, ledger: EpistemicLedger, bot: Any) -> None:
+        """Populate the EpistemicLedger with evidence from the latest snapshot.
+
+        Pure recording — no decisions, no recommendations.
+        Called from bot's on_step after record_tick.
+        """
+        if not self._snapshots:
+            return
+        snap = self._snapshots[-1]
+        tick = snap.tick
+
+        # Record capabilities observed
+        seen_caps = set()
+        for uname in snap.own_unit_names:
+            cap_name = uname.lower()
+            if cap_name not in seen_caps:
+                seen_caps.add(cap_name)
+                ledger.observe_capability(
+                    name=cap_name, category="unit", tick=tick,
+                    evidence_data={"unit_count": snap.own_unit_names.count(uname)},
+                )
+        for sname in snap.own_structure_names:
+            cap_name = sname.lower()
+            if cap_name not in seen_caps:
+                seen_caps.add(cap_name)
+                ledger.observe_capability(
+                    name=cap_name, category="structure", tick=tick,
+                )
+
+        # Record terrain capability usage
+        if hasattr(bot, 'encoder') and hasattr(bot.encoder, 'information'):
+            info = bot.encoder.information
+            if info.cliff_density > 0.15:
+                ledger.observe_capability(
+                    name="cliff_map", category="terrain", tick=tick,
+                    evidence_data={
+                        "cliff_density": info.cliff_density,
+                        "terrain_complexity": info.terrain_complexity,
+                    },
+                )
+
+        # Record enemy capabilities observed
+        enemy_caps = set()
+        for eu_name in snap.enemy_unit_names:
+            if eu_name not in enemy_caps:
+                enemy_caps.add(eu_name)
+                ledger.observe_capability(
+                    name=f"enemy_{eu_name.lower()}", category="unit", tick=tick,
+                )
 
     # ── Failure Detectors ────────────────────────────────────────
 
